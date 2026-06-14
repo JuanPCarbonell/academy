@@ -1,0 +1,1876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>dbt: Data Build Tool — Theory</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3354;
+    --accent: #FF6B35;
+    --accent2: #4ECDC4;
+    --accent3: #A78BFA;
+    --text: #E8EAF0;
+    --muted: #8892b0;
+    --green: #48BB78;
+    --yellow: #ECC94B;
+    --red: #FC8181;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ─── Slide Container ─── */
+  #deck {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .slide {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 3rem 4rem;
+    opacity: 0;
+    transform: translateX(60px);
+    transition: opacity 0.45s ease, transform 0.45s ease;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: all;
+  }
+  .slide.exit-left {
+    opacity: 0;
+    transform: translateX(-60px);
+    pointer-events: none;
+  }
+
+  /* ─── Progress Bar ─── */
+  #progress-bar {
+    position: fixed;
+    top: 0; left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.4s ease;
+    z-index: 100;
+  }
+
+  /* ─── Navigation ─── */
+  #nav {
+    position: fixed;
+    bottom: 1.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    background: rgba(26,29,39,0.9);
+    border: 1px solid var(--border);
+    border-radius: 40px;
+    padding: 0.5rem 1.2rem;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+  #nav button {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.3rem 0.6rem;
+    border-radius: 8px;
+    transition: background 0.2s, color 0.2s;
+  }
+  #nav button:hover { background: var(--surface2); color: var(--accent); }
+  #slide-counter { font-size: 0.85rem; color: var(--muted); min-width: 60px; text-align: center; }
+
+  /* ─── Slide number top-right ─── */
+  #slide-num-badge {
+    position: fixed;
+    top: 1.2rem; right: 1.5rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    z-index: 100;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Keyboard hint ─── */
+  #hint {
+    position: fixed;
+    bottom: 1.8rem; right: 1.5rem;
+    font-size: 0.7rem;
+    color: var(--muted);
+    z-index: 100;
+  }
+
+  /* ─── Typography ─── */
+  .slide-title {
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.3rem;
+    background: linear-gradient(135deg, var(--text) 60%, var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .slide-subtitle {
+    font-size: 1.05rem;
+    color: var(--muted);
+    margin-bottom: 2.2rem;
+  }
+  .section-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(255,107,53,0.12);
+    border: 1px solid rgba(255,107,53,0.3);
+    border-radius: 20px;
+    padding: 0.2rem 0.8rem;
+    margin-bottom: 0.9rem;
+  }
+
+  /* ─── Grid helpers ─── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; width: 100%; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.2rem; width: 100%; }
+  .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; width: 100%; }
+
+  /* ─── Cards ─── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.3rem 1.5rem;
+  }
+  .card.accent-top { border-top: 3px solid var(--accent); }
+  .card.accent2-top { border-top: 3px solid var(--accent2); }
+  .card.accent3-top { border-top: 3px solid var(--accent3); }
+  .card.green-top  { border-top: 3px solid var(--green); }
+
+  .card-icon { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; }
+  .card-body { font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+
+  /* ─── Code blocks ─── */
+  pre { border-radius: 10px; font-size: 0.82rem; width: 100%; overflow: auto; }
+  code.inline {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    font-family: 'Consolas', 'Fira Code', monospace;
+    font-size: 0.9em;
+    color: var(--accent2);
+  }
+
+  /* ─── DAG / flow diagrams ─── */
+  .dag-node {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.55rem 1.2rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: 'Consolas', monospace;
+    white-space: nowrap;
+  }
+  .dag-node.source { background: rgba(78,205,196,0.15); border: 1px solid var(--accent2); color: var(--accent2); }
+  .dag-node.bronze { background: rgba(167,139,250,0.15); border: 1px solid var(--accent3); color: var(--accent3); }
+  .dag-node.silver { background: rgba(255,107,53,0.15); border: 1px solid var(--accent); color: var(--accent); }
+  .dag-node.gold { background: rgba(72,187,120,0.15); border: 1px solid var(--green); color: var(--green); }
+  .dag-arrow { color: var(--muted); font-size: 1.4rem; margin: 0 0.3rem; }
+
+  .dag-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+
+  /* ─── Highlight boxes ─── */
+  .callout {
+    display: flex;
+    gap: 0.8rem;
+    background: rgba(255,107,53,0.08);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 0.8rem 1rem;
+    font-size: 0.9rem;
+    color: var(--text);
+    margin: 0.6rem 0;
+  }
+  .callout.teal { background: rgba(78,205,196,0.08); border-left-color: var(--accent2); }
+  .callout.purple { background: rgba(167,139,250,0.08); border-left-color: var(--accent3); }
+  .callout.green  { background: rgba(72,187,120,0.08); border-left-color: var(--green); }
+
+  /* ─── Big stat ─── */
+  .big-stat { font-size: 3.5rem; font-weight: 800; color: var(--accent); }
+  .stat-label { font-size: 0.9rem; color: var(--muted); }
+
+  /* ─── Comparison table ─── */
+  table.compare {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  table.compare th {
+    background: var(--surface2);
+    color: var(--accent);
+    padding: 0.6rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  table.compare td {
+    padding: 0.55rem 1rem;
+    border: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+  table.compare tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+  /* ─── Steps / timeline ─── */
+  .steps { display: flex; flex-direction: column; gap: 0.7rem; width: 100%; }
+  .step { display: flex; gap: 1rem; align-items: flex-start; }
+  .step-num {
+    min-width: 2rem; height: 2rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-content { flex: 1; }
+  .step-title { font-weight: 600; font-size: 0.95rem; }
+  .step-desc  { font-size: 0.82rem; color: var(--muted); margin-top: 0.15rem; }
+
+  /* ─── Stack diagram ─── */
+  .stack-layer {
+    width: 100%;
+    padding: 0.7rem 1.5rem;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.4rem;
+  }
+
+  /* ─── Pill tags ─── */
+  .pill {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin: 0.15rem;
+  }
+  .pill-orange { background: rgba(255,107,53,0.2); color: var(--accent); }
+  .pill-teal   { background: rgba(78,205,196,0.2); color: var(--accent2); }
+  .pill-purple { background: rgba(167,139,250,0.2); color: var(--accent3); }
+  .pill-green  { background: rgba(72,187,120,0.2); color: var(--green); }
+
+  /* ─── TITLE SLIDE background ─── */
+  .slide.title-slide {
+    background: radial-gradient(ellipse at 30% 50%, rgba(255,107,53,0.15) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 30%, rgba(78,205,196,0.12) 0%, transparent 55%),
+                var(--bg);
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  /* ─── Content slide header ─── */
+  .slide-header { width: 100%; margin-bottom: 1.5rem; }
+
+  /* ─── Scrollable content ─── */
+  .scroll-content {
+    width: 100%;
+    overflow-y: auto;
+    max-height: calc(100vh - 12rem);
+    padding-right: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* Ensure full layout slides don't scroll */
+  .slide { overflow: hidden; }
+
+  ul.nice { list-style: none; padding: 0; }
+  ul.nice li {
+    display: flex; align-items: flex-start; gap: 0.6rem;
+    font-size: 0.9rem; margin-bottom: 0.6rem; color: var(--text); line-height: 1.5;
+  }
+  ul.nice li::before {
+    content: "▸";
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 0.05rem;
+  }
+</style>
+</head>
+<body>
+
+<div id="progress-bar"></div>
+<div id="slide-num-badge"></div>
+<div id="hint">← → arrow keys to navigate</div>
+
+<div id="deck">
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 1 — TITLE
+═══════════════════════════════════════════════════════════ -->
+<div class="slide title-slide active" id="s1">
+  <div style="max-width:700px;">
+    <div style="font-size:0.75rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:1.5rem;font-weight:600;">
+      5-Day Intensive Course
+    </div>
+    <h1 style="font-size:4.5rem;font-weight:800;letter-spacing:-0.03em;line-height:1.05;margin-bottom:1rem;">
+      <span style="color:var(--text)">dbt</span>
+      <span style="color:var(--accent)">:</span>
+      <span style="background:linear-gradient(135deg,var(--text),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;"> Data Build Tool</span>
+    </h1>
+    <p style="font-size:1.25rem;color:var(--muted);line-height:1.7;max-width:560px;margin-bottom:2.5rem;">
+      Transform raw data into trusted analytics.<br>
+      From zero to production on <strong style="color:var(--text)">Snowflake</strong>.
+    </p>
+    <div style="display:flex;gap:0.8rem;flex-wrap:wrap;">
+      <span class="pill pill-orange">dbt Core</span>
+      <span class="pill pill-teal">dbt Cloud</span>
+      <span class="pill pill-purple">Snowflake</span>
+      <span class="pill pill-green">SQL / Jinja</span>
+    </div>
+    <div style="margin-top:3rem;font-size:0.8rem;color:var(--muted);">
+      Day 1 Morning &nbsp;·&nbsp; Theory Session &nbsp;·&nbsp; ≈ 3 hours
+    </div>
+  </div>
+  <!-- decorative grid -->
+  <div style="position:absolute;right:3rem;top:50%;transform:translateY(-50%);opacity:0.06;font-size:0.65rem;font-family:monospace;color:var(--accent2);pointer-events:none;line-height:1.8;text-align:right;">
+    SELECT * FROM bronze_tpch_orders<br>
+    {{ ref('bronze_tpch_orders') }}<br>
+    dbt run --select gold.*<br>
+    dbt test --select bronze.*<br>
+    {{ config(materialized='incremental') }}<br>
+    dbt snapshot --select orders<br>
+    dbt docs generate && serve<br>
+    sources: - name: tpch<br>
+    {% macro cents_to_dollars(col) %}<br>
+    dbt build --target prod<br>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 2 — AGENDA
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s2">
+  <div class="slide-header">
+    <div class="section-tag">Agenda</div>
+    <h2 class="slide-title">What We'll Cover Today</h2>
+    <p class="slide-subtitle">Morning theory · Then 4.5 days of hands-on building</p>
+  </div>
+  <div class="grid-2" style="gap:1rem;">
+    <div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <div class="step-title">The Problem dbt Solves</div>
+            <div class="step-desc">Why SQL scripts don't scale</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <div class="step-title">ELT vs ETL & Modern Data Stack</div>
+            <div class="step-desc">Where dbt fits</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <div class="step-title">Core Concepts</div>
+            <div class="step-desc">Models, Sources, Refs, DAG</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <div class="step-title">Materializations</div>
+            <div class="step-desc">View, Table, Incremental, Ephemeral</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-content">
+            <div class="step-title">Tests &amp; Docs</div>
+            <div class="step-desc">Data quality and auto-documentation</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">6</div>
+          <div class="step-content">
+            <div class="step-title">Seeds &amp; Snapshots</div>
+            <div class="step-desc">Static data and SCD Type 2</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">7</div>
+          <div class="step-content">
+            <div class="step-title">Macros, Jinja &amp; Packages</div>
+            <div class="step-desc">Reusability and the dbt ecosystem</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">8</div>
+          <div class="step-content">
+            <div class="step-title">dbt Core vs dbt Cloud</div>
+            <div class="step-desc">Scheduling, CI/CD, IDE</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">9</div>
+          <div class="step-content">
+            <div class="step-title">dbt + Snowflake</div>
+            <div class="step-desc">Connection, warehouses, best practices</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">10</div>
+          <div class="step-content">
+            <div class="step-title">Best Practices</div>
+            <div class="step-desc">Project structure, naming conventions</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 3 — HISTORY OF DATA ANALYTICS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s3">
+  <div class="slide-header">
+    <div class="section-tag">Context</div>
+    <h2 class="slide-title">How We Got Here</h2>
+    <p class="slide-subtitle">From spreadsheets to the modern data stack</p>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:0.55rem;width:100%;max-width:900px;">
+
+    <div style="display:flex;align-items:flex-start;gap:1rem;">
+      <div style="min-width:80px;text-align:right;font-size:0.78rem;color:var(--muted);padding-top:0.15rem;">1980s</div>
+      <div style="width:2px;background:var(--border);align-self:stretch;flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <span style="font-weight:600;color:var(--text);">Spreadsheets & CSV</span>
+        <span style="color:var(--muted);font-size:0.85rem;margin-left:0.6rem;">Excel, Lotus 1-2-3 — analysts own the data, no shared infrastructure</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:1rem;">
+      <div style="min-width:80px;text-align:right;font-size:0.78rem;color:var(--muted);padding-top:0.15rem;">1990s</div>
+      <div style="width:2px;background:var(--border);align-self:stretch;flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <span style="font-weight:600;color:var(--text);">Relational Databases & On-prem DWH</span>
+        <span style="color:var(--muted);font-size:0.85rem;margin-left:0.6rem;">Oracle, SQL Server, Teradata — SQL emerges, but ETL pipelines are expensive and slow to change</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:1rem;">
+      <div style="min-width:80px;text-align:right;font-size:0.78rem;color:var(--muted);padding-top:0.15rem;">2000s</div>
+      <div style="width:2px;background:var(--border);align-self:stretch;flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <span style="font-weight:600;color:var(--text);">Big Data Era</span>
+        <span style="color:var(--muted);font-size:0.85rem;margin-left:0.6rem;">Hadoop, MapReduce — scale at last, but requires specialized engineering and Java. Analysts locked out.</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:1rem;">
+      <div style="min-width:80px;text-align:right;font-size:0.78rem;color:var(--muted);padding-top:0.15rem;">2010–15</div>
+      <div style="width:2px;background:var(--border);align-self:stretch;flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <span style="font-weight:600;color:var(--accent2);">Cloud Data Warehouses</span>
+        <span style="color:var(--muted);font-size:0.85rem;margin-left:0.6rem;">Redshift (2012), BigQuery (2010), Snowflake (2012) — columnar, elastic, SQL-first. Storage and compute separated.</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:1rem;">
+      <div style="min-width:80px;text-align:right;font-size:0.78rem;color:var(--muted);padding-top:0.15rem;">2016</div>
+      <div style="width:2px;background:var(--border);align-self:stretch;flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <span style="font-weight:600;color:var(--accent);">dbt is born</span>
+        <span style="color:var(--muted);font-size:0.85rem;margin-left:0.6rem;">Fishtown Analytics releases dbt — "the T in ELT". Load raw data first, transform inside the warehouse with SQL + software engineering practices.</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:1rem;">
+      <div style="min-width:80px;text-align:right;font-size:0.78rem;color:var(--muted);padding-top:0.15rem;">2020s</div>
+      <div style="width:2px;background:var(--border);align-self:stretch;flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <span style="font-weight:600;color:var(--accent3);">Modern Data Stack</span>
+        <span style="color:var(--muted);font-size:0.85rem;margin-left:0.6rem;">Fivetran → Snowflake → dbt → Looker/Tableau. Each layer does one thing well. 100k+ companies run dbt in production.</span>
+      </div>
+    </div>
+
+    <div class="callout teal" style="margin-top:0.4rem;font-size:0.82rem;">
+      <span>💡</span>
+      <span>The shift to cloud DWH made it cheap and fast to load raw data first. That made ELT — and dbt — possible.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 4 — THE ANALYTICS ENGINEER
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s4">
+  <div class="slide-header">
+    <div class="section-tag">Context</div>
+    <h2 class="slide-title">The Analytics Engineer</h2>
+    <p class="slide-subtitle">The role dbt created — or formalized</p>
+  </div>
+  <div class="grid-2">
+    <div>
+      <p style="color:var(--muted);font-size:0.88rem;margin-bottom:1.2rem;">Before dbt, the gap between raw data and dashboards was a no-man's land.</p>
+      <div style="display:flex;flex-direction:column;gap:0.7rem;">
+        <div style="background:var(--surface2);border-radius:8px;padding:0.9rem 1rem;">
+          <div style="font-weight:600;color:var(--accent3);margin-bottom:0.3rem;">Data Engineer</div>
+          <div style="font-size:0.83rem;color:var(--muted);">Builds pipelines, moves data. Thinks in infrastructure and reliability. Usually doesn't own the business logic.</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.9rem 1rem;border:1px solid var(--accent);position:relative;">
+          <div style="position:absolute;top:-10px;left:12px;background:var(--accent);color:#fff;font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:4px;">YOU ARE HERE</div>
+          <div style="font-weight:600;color:var(--accent);margin-bottom:0.3rem;">Analytics Engineer</div>
+          <div style="font-size:0.83rem;color:var(--muted);">Transforms raw data into clean, tested, documented models. Speaks SQL and understands the business. dbt is the tool.</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.9rem 1rem;">
+          <div style="font-weight:600;color:var(--green);margin-bottom:0.3rem;">Data Analyst / BI Engineer</div>
+          <div style="font-size:0.83rem;color:var(--muted);">Queries gold models to build dashboards and answer business questions. Depends on clean, reliable data.</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:1rem;">An analytics engineer brings software engineering discipline to SQL:</p>
+      <div style="display:flex;flex-direction:column;gap:0.6rem;">
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <span style="font-size:1.1rem;">🔁</span>
+          <span style="font-size:0.85rem;color:var(--text);">Version control for every transformation</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <span style="font-size:1.1rem;">✅</span>
+          <span style="font-size:0.85rem;color:var(--text);">Automated tests on every model</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <span style="font-size:1.1rem;">📖</span>
+          <span style="font-size:0.85rem;color:var(--text);">Self-documenting data catalog</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <span style="font-size:1.1rem;">🔗</span>
+          <span style="font-size:0.85rem;color:var(--text);">Explicit dependency graph — no more mystery order</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <span style="font-size:1.1rem;">🚀</span>
+          <span style="font-size:0.85rem;color:var(--text);">CI/CD pipelines just like software teams</span>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:0.8rem;font-size:0.82rem;">
+        💡 dbt Labs coined "analytics engineer" in 2016. By 2024 it's one of the fastest-growing data roles.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 25 — WHY VERSION CONTROL EXISTS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s5">
+  <div class="slide-header">
+    <div class="section-tag">Version Control</div>
+    <h2 class="slide-title">The Problem Before Git</h2>
+    <p class="slide-subtitle">You've already lived this. Probably with spreadsheets.</p>
+  </div>
+  <div class="grid-2">
+    <div>
+      <div class="card" style="border-left:3px solid var(--red);margin-bottom:0.8rem;">
+        <div class="card-title">The "final" file problem</div>
+        <div class="card-body">
+          <code class="inline">analysis_v1.sql</code><br>
+          <code class="inline">analysis_v2_FINAL.sql</code><br>
+          <code class="inline">analysis_v2_FINAL_revised.sql</code><br>
+          <code class="inline">analysis_v2_FINAL_revised_USE_THIS.sql</code><br><br>
+          Sound familiar? No one knows which is current. No one knows what changed between versions. If something breaks, there's no way to go back safely.
+        </div>
+      </div>
+      <div class="card" style="border-left:3px solid var(--red);">
+        <div class="card-title">The collaboration problem</div>
+        <div class="card-body">
+          Two people edit the same SQL file. One saves over the other's work. There's no merge — just lost changes and broken pipelines. Email attachments and shared drives are not a solution.
+        </div>
+      </div>
+    </div>
+    <div>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.8rem;">Version control solves all of this by answering four questions about every file, at every moment:</p>
+      <div style="display:flex;flex-direction:column;gap:0.65rem;">
+        <div style="background:var(--surface2);border-radius:8px;padding:0.8rem 1rem;border-left:3px solid var(--accent);">
+          <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.2rem;color:var(--accent);">What changed?</div>
+          <div style="font-size:0.82rem;color:var(--muted);">Every line added, removed, or modified is recorded with a diff.</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.8rem 1rem;border-left:3px solid var(--accent2);">
+          <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.2rem;color:var(--accent2);">Who changed it?</div>
+          <div style="font-size:0.82rem;color:var(--muted);">Every change is signed by the author. Accountability is built in.</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.8rem 1rem;border-left:3px solid var(--accent3);">
+          <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.2rem;color:var(--accent3);">When?</div>
+          <div style="font-size:0.82rem;color:var(--muted);">A full timestamp history. You can see exactly what the code looked like at any point in time.</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.8rem 1rem;border-left:3px solid var(--green);">
+          <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.2rem;color:var(--green);">Why?</div>
+          <div style="font-size:0.82rem;color:var(--muted);">Every change has a commit message explaining the intent. Future-you will be grateful.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 26 — GIT HISTORY & CONCEPTS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s6">
+  <div class="slide-header">
+    <div class="section-tag">Version Control</div>
+    <h2 class="slide-title">Git — How It Works</h2>
+    <p class="slide-subtitle">Built in 2005 by Linus Torvalds in 10 days to manage the Linux kernel</p>
+  </div>
+  <div class="grid-2">
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.7rem;">Before Git, the Linux kernel used <strong style="color:var(--text)">BitKeeper</strong> — a proprietary tool. When the license was revoked in 2005, Torvalds built Git from scratch in two weeks. His goals: fast, distributed, and impossible to corrupt.</p>
+      <div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.8rem;">
+        <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;">
+          <span style="color:var(--accent);font-weight:600;">Repository (repo)</span>
+          <span style="color:var(--muted);font-size:0.83rem;margin-left:0.5rem;">— a folder tracked by Git. Contains all your files plus the full history of every change ever made.</span>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;">
+          <span style="color:var(--accent2);font-weight:600;">Commit</span>
+          <span style="color:var(--muted);font-size:0.83rem;margin-left:0.5rem;">— a snapshot of your files at a point in time. Like a save point in a game. Each commit has an ID, author, timestamp, and message.</span>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;">
+          <span style="color:var(--accent3);font-weight:600;">Branch</span>
+          <span style="color:var(--muted);font-size:0.83rem;margin-left:0.5rem;">— a parallel version of the repo. Work on a feature in isolation without touching the main codebase. Cheap to create, safe to experiment in.</span>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:0.75rem 1rem;">
+          <span style="color:var(--green);font-weight:600;">Merge</span>
+          <span style="color:var(--muted);font-size:0.83rem;margin-left:0.5rem;">— combines two branches. Git is smart about this — it applies only the differences, line by line.</span>
+        </div>
+      </div>
+      <div class="callout teal" style="font-size:0.82rem;">
+        <span>💡</span>
+        <span><strong>Distributed:</strong> every developer has a full copy of the entire repo history on their machine. No central server = no single point of failure.</span>
+      </div>
+    </div>
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.6rem;">The three stages of a file in Git:</p>
+      <div style="display:flex;flex-direction:column;gap:0.4rem;margin-bottom:1rem;">
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <div style="width:28px;height:28px;border-radius:50%;background:rgba(255,107,53,0.2);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:var(--accent);font-weight:700;flex-shrink:0;">1</div>
+          <div>
+            <div style="font-weight:600;font-size:0.85rem;">Working directory</div>
+            <div style="font-size:0.78rem;color:var(--muted);">You edited the file. Git sees the change but isn't tracking it yet.</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <div style="width:28px;height:28px;border-radius:50%;background:rgba(78,205,196,0.2);border:1px solid var(--accent2);display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:var(--accent2);font-weight:700;flex-shrink:0;">2</div>
+          <div>
+            <div style="font-weight:600;font-size:0.85rem;">Staging area <code class="inline">git add</code></div>
+            <div style="font-size:0.78rem;color:var(--muted);">You chose what to include in the next commit. Like putting items in a box before sealing it.</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;background:var(--surface2);padding:0.7rem 1rem;border-radius:8px;">
+          <div style="width:28px;height:28px;border-radius:50%;background:rgba(72,187,120,0.2);border:1px solid var(--green);display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:var(--green);font-weight:700;flex-shrink:0;">3</div>
+          <div>
+            <div style="font-weight:600;font-size:0.85rem;">Repository <code class="inline">git commit</code></div>
+            <div style="font-size:0.78rem;color:var(--muted);">The snapshot is sealed and added to the permanent history. This cannot be undone (only appended to).</div>
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="font-size:0.82rem;">
+        <span>🌿</span>
+        <span>Today there are <strong>over 100 million repositories</strong> on GitHub. Git is used by virtually every software team on the planet — and increasingly by data teams.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 5 — THE PROBLEM
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s7">
+  <div class="slide-header">
+    <div class="section-tag">The Problem</div>
+    <h2 class="slide-title">Life Before dbt</h2>
+    <p class="slide-subtitle">Sound familiar?</p>
+  </div>
+  <div class="grid-2">
+    <div>
+      <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem;">
+        <div class="card-icon">😱</div>
+        <div class="card-title">SQL script chaos</div>
+        <div class="card-body"><code class="inline">final_final_v3_REAL.sql</code> — nobody knows what runs first or why.</div>
+      </div>
+      <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem;">
+        <div class="card-icon">🔇</div>
+        <div class="card-title">No tests, no trust</div>
+        <div class="card-body">Dashboards silently break when upstream data changes.</div>
+      </div>
+      <div class="card" style="border-left:3px solid var(--red);">
+        <div class="card-icon">🏝️</div>
+        <div class="card-title">Knowledge silos</div>
+        <div class="card-body">Only one person understands the pipeline. They just quit.</div>
+      </div>
+    </div>
+    <div>
+      <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem;">
+        <div class="card-icon">🔄</div>
+        <div class="card-title">Copy-paste logic</div>
+        <div class="card-body">The same revenue formula lives in 12 different scripts. They disagree.</div>
+      </div>
+      <div class="card" style="border-left:3px solid var(--red);margin-bottom:1rem;">
+        <div class="card-icon">📝</div>
+        <div class="card-title">Zero documentation</div>
+        <div class="card-body">What does <code class="inline">is_active</code> mean? Ask whoever wrote it 3 years ago.</div>
+      </div>
+      <div class="callout" style="margin-top:0.5rem;">
+        💡 dbt solves all of this by bringing <strong>software engineering best practices</strong> to SQL transformations.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 4 — WHAT IS dbt
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s8">
+  <div class="slide-header">
+    <div class="section-tag">Core Concept</div>
+    <h2 class="slide-title">What is dbt?</h2>
+  </div>
+  <div style="width:100%;max-width:860px;">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem 2rem;margin-bottom:1.5rem;text-align:center;">
+      <p style="font-size:1.3rem;line-height:1.7;color:var(--text);">
+        dbt is an <strong style="color:var(--accent)">open-source transformation framework</strong> that lets<br>
+        data analysts and engineers write <strong style="color:var(--accent2)">modular SQL SELECT statements</strong><br>
+        that dbt compiles and runs against your data warehouse.
+      </p>
+    </div>
+    <div class="grid-3">
+      <div class="card accent-top">
+        <div class="card-icon">🔧</div>
+        <div class="card-title">Just SQL</div>
+        <div class="card-body">Write <code class="inline">SELECT</code> statements. dbt handles the <code class="inline">CREATE OR REPLACE</code> boilerplate.</div>
+      </div>
+      <div class="card accent2-top">
+        <div class="card-icon">🌐</div>
+        <div class="card-title">Version Controlled</div>
+        <div class="card-body">All transformations live in Git. Code review, history, rollbacks — standard dev workflow.</div>
+      </div>
+      <div class="card accent3-top">
+        <div class="card-icon">🧪</div>
+        <div class="card-title">Tested & Documented</div>
+        <div class="card-body">Built-in testing and auto-generated documentation as first-class features.</div>
+      </div>
+    </div>
+    <div class="callout teal" style="margin-top:1rem;">
+      <span>🎯</span>
+      <span><strong>Key insight:</strong> dbt does the <strong>T</strong> in ELT. It only transforms data that is already in your warehouse — it doesn't move or load it.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 5 — ETL vs ELT
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s9">
+  <div class="slide-header">
+    <div class="section-tag">Architecture</div>
+    <h2 class="slide-title">ETL vs ELT</h2>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <div style="text-align:center;font-weight:700;font-size:1.05rem;margin-bottom:1rem;color:var(--muted);">Old way — ETL</div>
+      <div style="display:flex;flex-direction:column;gap:0.4rem;">
+        <div class="stack-layer" style="background:rgba(252,129,129,0.15);border:1px solid var(--red);color:var(--red);">① Extract</div>
+        <div style="text-align:center;color:var(--muted);font-size:0.8rem;">↓ Transform happens OUTSIDE the warehouse<br>(Python, Spark, custom ETL tools)</div>
+        <div class="stack-layer" style="background:rgba(252,129,129,0.15);border:1px solid var(--red);color:var(--red);">② Transform</div>
+        <div style="text-align:center;color:var(--muted);font-size:0.8rem;">↓ Only then load clean data</div>
+        <div class="stack-layer" style="background:rgba(252,129,129,0.15);border:1px solid var(--red);color:var(--red);">③ Load</div>
+      </div>
+      <div class="callout" style="margin-top:1rem;font-size:0.8rem;">
+        <span>⚠️</span><span>Expensive to re-transform, slow iteration, requires separate compute.</span>
+      </div>
+    </div>
+    <div>
+      <div style="text-align:center;font-weight:700;font-size:1.05rem;margin-bottom:1rem;color:var(--accent2);">Modern — ELT</div>
+      <div style="display:flex;flex-direction:column;gap:0.4rem;">
+        <div class="stack-layer" style="background:rgba(78,205,196,0.12);border:1px solid var(--accent2);color:var(--accent2);">① Extract</div>
+        <div style="text-align:center;color:var(--muted);font-size:0.8rem;">↓ Load raw data FIRST (Fivetran, Airbyte, etc.)</div>
+        <div class="stack-layer" style="background:rgba(78,205,196,0.12);border:1px solid var(--accent2);color:var(--accent2);">② Load (raw)</div>
+        <div style="text-align:center;color:var(--muted);font-size:0.8rem;">↓ Transform INSIDE the warehouse using SQL</div>
+        <div class="stack-layer" style="background:rgba(255,107,53,0.15);border:1px solid var(--accent);color:var(--accent);">③ Transform ← dbt lives here</div>
+      </div>
+      <div class="callout teal" style="margin-top:1rem;font-size:0.8rem;">
+        <span>✅</span><span>Use warehouse compute power. Raw data is always preserved. Fast iteration.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 6 — MODERN DATA STACK
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s10">
+  <div class="slide-header">
+    <div class="section-tag">Ecosystem</div>
+    <h2 class="slide-title">The Modern Data Stack</h2>
+    <p class="slide-subtitle">dbt sits in the transformation layer</p>
+  </div>
+  <div style="width:100%;max-width:860px;">
+    <div style="display:flex;flex-direction:column;gap:0.6rem;margin-bottom:1.5rem;">
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:1rem;align-items:center;">
+        <div style="font-size:0.75rem;color:var(--muted);text-align:right;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">Sources</div>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+          <span class="pill pill-teal">Salesforce</span>
+          <span class="pill pill-teal">PostgreSQL</span>
+          <span class="pill pill-teal">Stripe</span>
+          <span class="pill pill-teal">Google Ads</span>
+          <span class="pill pill-teal">APIs</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:1rem;align-items:center;">
+        <div style="font-size:0.75rem;color:var(--muted);text-align:right;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">Ingestion</div>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+          <span class="pill pill-purple">Fivetran</span>
+          <span class="pill pill-purple">Airbyte</span>
+          <span class="pill pill-purple">Stitch</span>
+          <span class="pill pill-purple">Custom loaders</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:1rem;align-items:center;">
+        <div style="font-size:0.75rem;color:var(--muted);text-align:right;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">Storage</div>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+          <span class="pill pill-green">❄️ Snowflake</span>
+          <span class="pill pill-green">BigQuery</span>
+          <span class="pill pill-green">Redshift</span>
+          <span class="pill pill-green">Databricks</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:1rem;align-items:center;">
+        <div style="font-size:0.75rem;color:var(--muted);text-align:right;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">Transform</div>
+        <div style="background:rgba(255,107,53,0.15);border:2px solid var(--accent);border-radius:10px;padding:0.5rem 1rem;display:flex;align-items:center;gap:0.8rem;">
+          <span style="font-size:1.4rem;">🔧</span>
+          <span style="font-weight:700;color:var(--accent);font-size:1.05rem;">dbt</span>
+          <span style="color:var(--muted);font-size:0.82rem;">— you are here —</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:1rem;align-items:center;">
+        <div style="font-size:0.75rem;color:var(--muted);text-align:right;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">BI / Output</div>
+        <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+          <span class="pill pill-orange">Looker</span>
+          <span class="pill pill-orange">Tableau</span>
+          <span class="pill pill-orange">Power BI</span>
+          <span class="pill pill-orange">Metabase</span>
+          <span class="pill pill-orange">Python / ML</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 7 — dbt PROJECT STRUCTURE
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s11">
+  <div class="slide-header">
+    <div class="section-tag">Project</div>
+    <h2 class="slide-title">dbt Project Structure</h2>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-bash">my_dbt_project/
+├── dbt_project.yml       # project config
+├── profiles.yml          # connection settings
+├── packages.yml          # external packages
+│
+├── models/               # SQL transformations
+│   ├── bronze/          # raw → clean
+│   ├── silver/     # business logic
+│   └── gold/            # final outputs
+│       ├── finance/
+│       └── marketing/
+│
+├── seeds/                # static CSV data
+├── snapshots/            # SCD Type 2 history
+├── macros/               # reusable Jinja functions
+├── tests/                # custom data tests
+└── analyses/             # ad-hoc SQL queries</code></pre>
+    </div>
+    <div>
+      <div class="card accent-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">📄 dbt_project.yml</div>
+        <div class="card-body">Project name, version, model paths, variable defaults, and materialization configs per directory.</div>
+      </div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">🔌 profiles.yml</div>
+        <div class="card-body">Lives in <code class="inline">~/.dbt/</code>. Stores database credentials (never commit this to Git!).</div>
+      </div>
+      <div class="card accent3-top">
+        <div class="card-title">📦 packages.yml</div>
+        <div class="card-body">Like <code class="inline">requirements.txt</code> for dbt. Pulls in packages like <code class="inline">dbt-utils</code>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 8 — MODELS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s12">
+  <div class="slide-header">
+    <div class="section-tag">Core Concept</div>
+    <h2 class="slide-title">Models — The Heart of dbt</h2>
+    <p class="slide-subtitle">A model is just a <code class="inline">.sql</code> file containing a single SELECT statement</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-sql">-- models/bronze/bronze_tpch_orders.sql
+-- That's it. Just a SELECT.
+
+SELECT
+    o_orderkey              AS order_id,
+    o_custkey               AS customer_id,
+    o_orderstatus           AS order_status,
+    o_totalprice            AS total_price,
+    o_orderdate             AS order_date
+FROM {{ source('tpch', 'orders') }}</code></pre>
+      <div class="callout teal" style="margin-top:0.8rem;font-size:0.82rem;">
+        <span>⚡</span>
+        <span>dbt compiles this into <code class="inline">CREATE OR REPLACE TABLE / VIEW</code> — you never write DDL.</span>
+      </div>
+    </div>
+    <div>
+      <div class="card accent-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">Naming convention</div>
+        <div class="card-body">
+          <code class="inline">bronze_</code> → bronze layer (clean, standardize raw data)<br>
+          <code class="inline">silver_</code> → silver layer (business logic, joins)<br>
+          <code class="inline">gold_</code> → gold layer (analytics-ready, aggregations)<br>
+          
+        </div>
+      </div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">Run commands</div>
+        <div class="card-body">
+          <code class="inline">dbt run</code> — run all models<br>
+          <code class="inline">dbt run --select bronze_tpch_orders</code> — single model<br>
+          <code class="inline">dbt run --select bronze.*</code> — by folder<br>
+          <code class="inline">dbt run --select +gold_orders</code> — with deps
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 9 — SOURCES
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s13">
+  <div class="slide-header">
+    <div class="section-tag">Sources</div>
+    <h2 class="slide-title">Sources — Raw Data Contracts</h2>
+    <p class="slide-subtitle">Declare where your raw data lives, then reference it by name</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem;">Declare in <code class="inline">models/bronze/sources.yml</code></p>
+<pre><code class="language-yaml">version: 2
+
+sources:
+  - name: tpch
+    database: SNOWFLAKE_SAMPLE_DATA
+    schema: TPCH_SF1
+    tables:
+      - name: orders
+        description: "1.5M orders"
+
+      - name: lineitem
+        description: "6M line items"
+        freshness: null   # read-only source
+
+      - name: customer
+        description: "150K customers"</code></pre>
+    </div>
+    <div>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem;">Reference in models</p>
+<pre><code class="language-sql">-- ✅ Use source() — tracked by dbt
+SELECT * FROM {{ source('tpch', 'orders') }}
+
+-- ❌ Don't hardcode table names
+SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS</code></pre>
+      <div class="card accent2-top" style="margin-top:0.8rem;">
+        <div class="card-title">Why use sources?</div>
+        <ul class="nice" style="margin-top:0.5rem;">
+          <li>Appear in the DAG (lineage tracking)</li>
+          <li>Enable freshness checks</li>
+          <li>Single place to rename/move tables</li>
+          <li>Auto-documented</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 10 — REFS AND DAG
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s14">
+  <div class="slide-header">
+    <div class="section-tag">DAG</div>
+    <h2 class="slide-title">ref() and the DAG</h2>
+    <p class="slide-subtitle">ref() is how models depend on each other — dbt builds the execution graph automatically</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-sql">-- models/silver/silver_orders_enriched.sql
+SELECT
+    o.order_id,
+    o.order_date,
+    o.total_price,
+    c.customer_name,
+    c.market_segment,
+    n.nation_name
+FROM {{ ref('bronze_tpch_orders') }}    o
+JOIN {{ ref('bronze_tpch_customers') }} c ON o.customer_id = c.customer_id
+JOIN {{ ref('bronze_tpch_nations') }}   n ON c.nation_id   = n.nation_id</code></pre>
+      <pre style="margin-top:0.8rem;"><code class="language-sql">-- models/gold/gold_orders.sql
+SELECT
+    e.order_id,
+    e.order_date,
+    e.customer_name,
+    e.nation_name,
+    e.gross_revenue,
+    e.net_revenue
+FROM {{ ref('silver_orders_enriched') }} e</code></pre>
+    </div>
+    <div>
+      <div style="margin-bottom:1rem;">
+        <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.8rem;">Resulting DAG:</p>
+        <div class="dag-row">
+          <div class="dag-node source">TPCH_SF1.ORDERS</div>
+          <span class="dag-arrow">→</span>
+          <div class="dag-node bronze">bronze_tpch_orders</div>
+        </div>
+        <div class="dag-row">
+          <div class="dag-node source">TPCH_SF1.CUSTOMER</div>
+          <span class="dag-arrow">→</span>
+          <div class="dag-node bronze">bronze_tpch_customers</div>
+        </div>
+        <div class="dag-row" style="margin-left:2rem;">
+          <div class="dag-node bronze">bronze_tpch_orders</div>
+          <span class="dag-arrow">→</span>
+          <div class="dag-node silver">silver_orders_enriched</div>
+          <span class="dag-arrow">→</span>
+          <div class="dag-node gold">gold_orders</div>
+        </div>
+      </div>
+      <div class="callout green">
+        <span>🔑</span>
+        <span><strong>ref() guarantees:</strong> correct execution order, no circular dependencies, and automatic lineage documentation.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 11 — MATERIALIZATIONS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s15">
+  <div class="slide-header">
+    <div class="section-tag">Materializations</div>
+    <h2 class="slide-title">How Models Are Stored</h2>
+    <p class="slide-subtitle">Choose the right materialization for every model</p>
+  </div>
+  <div class="grid-2" style="gap:1rem;align-items:start;">
+    <div>
+      <div class="card accent-top" style="margin-bottom:0.8rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div class="card-title">view</div>
+          <span class="pill pill-teal">default</span>
+        </div>
+        <div class="card-body">Creates a SQL VIEW. Runs the query on every read. No storage cost, always fresh. Best for bronze models.</div>
+      </div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">table</div>
+        <div class="card-body">Creates a physical TABLE. Rebuilds from scratch every run. Best for gold that are queried heavily by BI tools.</div>
+      </div>
+    </div>
+    <div>
+      <div class="card accent3-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">incremental</div>
+        <div class="card-body">Appends or updates only <em>new</em> rows. Huge performance win for large fact tables. Requires an <code class="inline">is_incremental()</code> filter.</div>
+      </div>
+      <div class="card green-top">
+        <div class="card-title">ephemeral</div>
+        <div class="card-body">Not materialized at all — compiled as a CTE inside the parent model. Zero warehouse objects. Use for simple intermediates.</div>
+      </div>
+    </div>
+  </div>
+  <div class="callout" style="margin-top:0.8rem;font-size:0.82rem;">
+    <span>⚙️</span>
+    <span>Set globally in <code class="inline">dbt_project.yml</code> or per-model with <code class="inline">{{ config(materialized='table') }}</code> at the top of the file.</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 12 — INCREMENTAL DEEP DIVE
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s16">
+  <div class="slide-header">
+    <div class="section-tag">Materializations</div>
+    <h2 class="slide-title">Incremental Models — Deep Dive</h2>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-sql">-- models/gold/gold_orders.sql
+{{ config(
+    materialized = 'incremental',
+    unique_key   = 'order_id',
+    on_schema_change = 'sync_all_columns'
+) }}
+
+SELECT
+    order_id,
+    customer_id,
+    total_price,
+    order_date
+FROM {{ ref('silver_orders_enriched') }}
+
+{% if is_incremental() %}
+  -- Only process rows newer than the last run
+  WHERE order_date > (
+    SELECT MAX(order_date) FROM {{ this }}
+  )
+{% endif %}</code></pre>
+    </div>
+    <div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <div class="step-title">First run</div>
+            <div class="step-desc">Creates the table with all historical data. The <code class="inline">is_incremental()</code> block is skipped.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <div class="step-title">Subsequent runs</div>
+            <div class="step-desc">Only processes rows after the last <code class="inline">MAX(order_date)</code>. Merges/appends based on <code class="inline">unique_key</code>.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <div class="step-title">Full refresh</div>
+            <div class="step-desc"><code class="inline">dbt run --full-refresh</code> rebuilds from scratch when needed.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 13 — TESTS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s17">
+  <div class="slide-header">
+    <div class="section-tag">Testing</div>
+    <h2 class="slide-title">Tests — Trust Your Data</h2>
+    <p class="slide-subtitle">dbt has two types of tests. Both run with <code class="inline">dbt test</code></p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.85rem;font-weight:600;margin-bottom:0.5rem;color:var(--accent)">Generic Tests — in schema.yml</p>
+<pre><code class="language-yaml">models:
+  - name: bronze_tpch_orders
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: ['O', 'F', 'P']
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('bronze_tpch_customers')
+              field: customer_id</code></pre>
+    </div>
+    <div>
+      <p style="font-size:0.85rem;font-weight:600;margin-bottom:0.5rem;color:var(--accent2)">Singular Tests — custom SQL</p>
+<pre><code class="language-sql">-- tests/assert_positive_net_revenue.sql
+-- If this query returns any rows → TEST FAILS
+
+SELECT order_id, net_price
+FROM {{ ref('bronze_tpch_lineitem') }}
+WHERE net_price < 0</code></pre>
+      <div class="grid-2" style="gap:0.6rem;margin-top:0.8rem;">
+        <div class="card green-top">
+          <div class="card-title" style="font-size:0.82rem;">4 built-in tests</div>
+          <div class="card-body"><code class="inline">unique</code>, <code class="inline">not_null</code>, <code class="inline">accepted_values</code>, <code class="inline">relationships</code></div>
+        </div>
+        <div class="card accent3-top">
+          <div class="card-title" style="font-size:0.82rem;">dbt-utils adds 20+</div>
+          <div class="card-body"><code class="inline">not_empty_string</code>, <code class="inline">at_least_one</code>, <code class="inline">expression_is_true</code>…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 14 — DOCUMENTATION
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s18">
+  <div class="slide-header">
+    <div class="section-tag">Documentation</div>
+    <h2 class="slide-title">Auto-Generated Documentation</h2>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-yaml"># models/gold/schema.yml
+version: 2
+
+models:
+  - name: gold_orders
+    description: >
+      One row per order. Joins orders,
+      customers and payments into the
+      final analytics-ready fact table.
+    columns:
+      - name: order_id
+        description: "Primary key"
+        tests: [unique, not_null]
+      - name: total_price
+        description: >
+          Total order value before
+          discounts are applied.</code></pre>
+      <div style="margin-top:0.8rem;font-size:0.82rem;color:var(--muted);">You can also write docs in <code class="inline">.md</code> files and reference them with <code class="inline">{{ doc('my_doc') }}</code>.</div>
+    </div>
+    <div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num" style="background:var(--accent2);">1</div>
+          <div class="step-content">
+            <div class="step-title"><code class="inline">dbt docs generate</code></div>
+            <div class="step-desc">Compiles all descriptions + tests + lineage into a static site.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num" style="background:var(--accent2);">2</div>
+          <div class="step-content">
+            <div class="step-title"><code class="inline">dbt docs serve</code></div>
+            <div class="step-desc">Opens a local web server at <code class="inline">localhost:8080</code>. Interactive DAG, searchable column catalog.</div>
+          </div>
+        </div>
+      </div>
+      <div class="callout purple" style="margin-top:1rem;">
+        <span>📚</span>
+        <span>The documentation site includes a <strong>full DAG visualizer</strong> — click any model to see its upstream/downstream lineage.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 15 — SEEDS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s19">
+  <div class="slide-header">
+    <div class="section-tag">Seeds</div>
+    <h2 class="slide-title">Seeds — Static Data in Git</h2>
+    <p class="slide-subtitle">Load CSV files directly into your warehouse as tables</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.5rem;"><code class="inline">seeds/country_codes.csv</code></p>
+<pre><code class="language-csv">country_code,country_name,region
+US,United States,Americas
+GB,United Kingdom,Europe
+DE,Germany,Europe
+MX,Mexico,Americas
+JP,Japan,Asia-Pacific</code></pre>
+<pre style="margin-top:0.8rem;"><code class="language-bash"># Load into warehouse
+dbt seed
+
+# Reference in a model
+SELECT * FROM {{ ref('country_codes') }}</code></pre>
+    </div>
+    <div>
+      <div class="card accent-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">Good use cases for seeds</div>
+        <ul class="nice" style="margin-top:0.5rem;">
+          <li>Country / currency / region lookup tables</li>
+          <li>Cost mappings (e.g. channel costs)</li>
+          <li>Marketing campaign metadata</li>
+          <li>Fiscal calendar definitions</li>
+        </ul>
+      </div>
+      <div class="callout" style="font-size:0.82rem;">
+        <span>⚠️</span>
+        <span><strong>Not for large datasets.</strong> Seeds are meant for small, rarely-changing reference tables (&lt; a few thousand rows). For large data use sources.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 16 — SNAPSHOTS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s20">
+  <div class="slide-header">
+    <div class="section-tag">Snapshots</div>
+    <h2 class="slide-title">Snapshots — Track Historical Changes</h2>
+    <p class="slide-subtitle">Slowly Changing Dimensions (SCD Type 2) made easy</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-sql">-- snapshots/customers_snapshot.sql
+{% snapshot customers_snapshot %}
+
+{{ config(
+    target_database = 'ANALYTICS',
+    target_schema   = 'snapshots',
+    unique_key      = 'customer_id',
+    strategy        = 'timestamp',
+    updated_at      = 'updated_at'
+) }}
+
+SELECT * FROM {{ source('raw', 'customers_seed') }}
+
+{% endsnapshot %}</code></pre>
+<pre style="margin-top:0.8rem;"><code class="language-bash">dbt snapshot</code></pre>
+    </div>
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.5rem;">dbt adds these columns automatically:</p>
+      <div class="card accent3-top" style="margin-bottom:0.8rem;">
+        <div class="card-body" style="font-family:monospace;font-size:0.82rem;line-height:2;">
+          <span style="color:var(--accent3)">dbt_scd_id</span> &nbsp;— Surrogate key per record version<br>
+          <span style="color:var(--accent3)">dbt_updated_at</span> &nbsp;— When dbt processed this row<br>
+          <span style="color:var(--accent3)">dbt_valid_from</span> &nbsp;— When this version became active<br>
+          <span style="color:var(--accent3)">dbt_valid_to</span> &nbsp;— When it was superseded (NULL = current)
+        </div>
+      </div>
+      <div class="callout purple">
+        <span>📷</span>
+        <span>Think of snapshots as <strong>time-travel for your data</strong>. Query "what did this customer look like on March 1st?" becomes trivial.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 17 — MACROS & JINJA
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s21">
+  <div class="slide-header">
+    <div class="section-tag">Macros</div>
+    <h2 class="slide-title">Macros &amp; Jinja — DRY SQL</h2>
+    <p class="slide-subtitle">Don't Repeat Yourself. Write logic once, reuse everywhere.</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.4rem;"><code class="inline">macros/cents_to_dollars.sql</code></p>
+<pre><code class="language-sql">{% macro cents_to_dollars(column_name) %}
+    ({{ column_name }} / 100.0)::DECIMAL(10,2)
+{% endmacro %}</code></pre>
+
+      <p style="font-size:0.82rem;color:var(--muted);margin:0.8rem 0 0.4rem;"><code class="inline">macros/generate_surrogate_key.sql</code></p>
+<pre><code class="language-sql">{% macro surrogate_key(field_list) %}
+    MD5(
+        CONCAT_WS('|',
+            {% for field in field_list %}
+                COALESCE(CAST({{ field }} AS VARCHAR), '')
+                {% if not loop.last %}, {% endif %}
+            {% endfor %}
+        )
+    )
+{% endmacro %}</code></pre>
+    </div>
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.4rem;">Using macros in models:</p>
+<pre><code class="language-sql">SELECT
+    order_id,
+    {{ net_price('extended_price', 'discount_rate') }} AS net_price,
+    {{ surrogate_key(['order_id','line_number']) }} AS sk
+FROM {{ ref('bronze_tpch_lineitem') }}</code></pre>
+      <div class="card accent-top" style="margin-top:0.8rem;">
+        <div class="card-title">Jinja essentials</div>
+        <div class="card-body" style="font-family:monospace;font-size:0.8rem;line-height:1.9;">
+          <code class="inline">{{ ... }}</code> — expression (outputs value)<br>
+          <code class="inline">{% ... %}</code> — statement (logic, no output)<br>
+          <code class="inline">{# ... #}</code> — comment<br>
+          <code class="inline">{% if %} / {% for %}</code> — control flow<br>
+          <code class="inline">{{ this }}</code> — current model's relation<br>
+          <code class="inline">{{ env_var('VAR') }}</code> — environment variables
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 18 — PACKAGES
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s22">
+  <div class="slide-header">
+    <div class="section-tag">Ecosystem</div>
+    <h2 class="slide-title">Packages — dbt's Ecosystem</h2>
+    <p class="slide-subtitle">Reuse models, macros, and tests built by the community</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.5rem;"><code class="inline">packages.yml</code></p>
+<pre><code class="language-yaml">packages:
+  - package: dbt-labs/dbt_utils
+    version: 1.1.1
+
+  - package: dbt-labs/audit_helper
+    version: 0.9.0
+
+  - package: calogica/dbt_date
+    version: 0.9.2</code></pre>
+<pre style="margin-top:0.6rem;"><code class="language-bash">dbt deps   # install packages</code></pre>
+    </div>
+    <div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">🔧 dbt_utils (most popular)</div>
+        <div class="card-body">
+          <code class="inline">generate_surrogate_key()</code> — MD5 key from fields<br>
+          <code class="inline">star()</code> — SELECT * except some columns<br>
+          <code class="inline">pivot()</code> — dynamic pivoting<br>
+          <code class="inline">date_spine()</code> — complete date sequences<br>
+          <code class="inline">expression_is_true</code> — custom assertions
+        </div>
+      </div>
+      <div class="card accent3-top">
+        <div class="card-title">📅 dbt_date</div>
+        <div class="card-body">Full date dimension generation. Fiscal calendars, week numbers, holiday flags — all macro-generated for any warehouse.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 19 — dbt CORE vs CLOUD
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s23">
+  <div class="slide-header">
+    <div class="section-tag">Deployment</div>
+    <h2 class="slide-title">dbt Core vs dbt Cloud</h2>
+  </div>
+  <table class="compare">
+    <thead>
+      <tr>
+        <th>Feature</th>
+        <th>dbt Core (open source)</th>
+        <th>dbt Cloud (SaaS)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Cost</td><td>Free</td><td>Free tier + paid plans</td></tr>
+      <tr><td>Interface</td><td>CLI only</td><td>Web IDE + CLI</td></tr>
+      <tr><td>Scheduling</td><td>You manage (Airflow, cron)</td><td>Built-in scheduler &amp; jobs</td></tr>
+      <tr><td>CI/CD</td><td>Self-configured</td><td>Slim CI, PR checks built-in</td></tr>
+      <tr><td>Documentation hosting</td><td>You host it</td><td>Hosted automatically</td></tr>
+      <tr><td>Environment management</td><td>Manual profiles.yml</td><td>Dev / Bronze / Prod environments</td></tr>
+      <tr><td>Observability</td><td>Parse logs manually</td><td>Run history, alerts, dashboards</td></tr>
+      <tr><td>IDE features</td><td>Your editor</td><td>Preview, auto-complete, lineage in browser</td></tr>
+    </tbody>
+  </table>
+  <div class="callout teal" style="margin-top:1rem;font-size:0.82rem;">
+    <span>💡</span>
+    <span><strong>This course:</strong> We use <strong>dbt Cloud</strong> for Days 1–4, then run <strong>dbt Core</strong> locally and inside Snowflake on Day 5.</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 20 — dbt + SNOWFLAKE
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s24">
+  <div class="slide-header">
+    <div class="section-tag">Snowflake</div>
+    <h2 class="slide-title">dbt + Snowflake Integration</h2>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.5rem;"><code class="inline">~/.dbt/profiles.yml</code></p>
+<pre><code class="language-yaml">my_project:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: xy12345.us-east-1
+      user: JUAN_PABLO
+      password: "{{ env_var('DBT_PASSWORD') }}"
+      role: TRANSFORMER
+      database: ANALYTICS
+      warehouse: DBT_WH
+      schema: dbt_dev_juanpablo
+      threads: 4
+
+    prod:
+      type: snowflake
+      account: xy12345.us-east-1
+      user: DBT_SVC_ACCOUNT
+      authenticator: externalbrowser
+      role: TRANSFORMER
+      database: ANALYTICS
+      warehouse: DBT_WH_LARGE
+      schema: gold
+      threads: 8</code></pre>
+    </div>
+    <div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">❄️ Snowflake objects dbt creates</div>
+        <div class="card-body" style="line-height:1.8;">
+          Each developer has their own <code class="inline">schema</code> (e.g. <code class="inline">dbt_dev_juanpablo</code>)<br>
+          Prod writes to shared schemas (<code class="inline">bronze</code>, <code class="inline">silver</code>, <code class="inline">gold</code>)<br>
+          dbt creates <strong>tables, views, and transient tables</strong>
+        </div>
+      </div>
+      <div class="card accent3-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">Performance tips</div>
+        <ul class="nice" style="margin-top:0.4rem;">
+          <li>Use <code class="inline">transient_table</code> for silver models (no fail-safe = cheaper)</li>
+          <li>Set <code class="inline">query_tag</code> to track costs per model</li>
+          <li>Use <code class="inline">copy_grants=true</code> to preserve permissions on deploys</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 21 — dbt BUILD COMMAND
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s25">
+  <div class="slide-header">
+    <div class="section-tag">Commands</div>
+    <h2 class="slide-title">Essential dbt Commands</h2>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+<pre><code class="language-bash"># Project setup
+dbt init my_project        # scaffold a new project
+dbt debug                  # test connection
+dbt deps                   # install packages
+
+# Running
+dbt run                    # run all models
+dbt run --select bronze_+     # bronze_ and all downstream
+dbt run --select +gold_orders  # gold_orders + all upstream
+dbt run --exclude snapshots.*
+dbt run --target prod      # use prod profile
+
+# Testing
+dbt test                   # run all tests
+dbt test --select bronze_tpch_orders
+dbt source freshness       # check source freshness
+
+# Seeds & Snapshots
+dbt seed
+dbt snapshot
+
+# Documentation
+dbt docs generate
+dbt docs serve</code></pre>
+    </div>
+    <div>
+      <div class="card accent-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">🚀 dbt build (recommended)</div>
+        <div class="card-body"><code class="inline">dbt build</code> runs seeds → snapshots → models → tests in dependency order. One command for everything. Perfect for CI/CD.</div>
+      </div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-title">Node selection syntax</div>
+        <div class="card-body">
+          <code class="inline">model_name</code> — just that model<br>
+          <code class="inline">+model_name</code> — model + all parents<br>
+          <code class="inline">model_name+</code> — model + all children<br>
+          <code class="inline">tag:daily</code> — models with that tag<br>
+          <code class="inline">path:models/gold</code> — by folder path
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 22 — BEST PRACTICES
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s26">
+  <div class="slide-header">
+    <div class="section-tag">Best Practices</div>
+    <h2 class="slide-title">Best Practices</h2>
+  </div>
+  <div class="grid-2" style="gap:1rem;align-items:start;">
+    <div>
+      <div class="card accent-top" style="margin-bottom:0.8rem;">
+        <div class="card-icon">🏗️</div>
+        <div class="card-title">Layer your models</div>
+        <div class="card-body"><strong>Bronze</strong>: 1-to-1 with source tables, rename/cast only.<br>
+        <strong>Silver</strong>: Business logic, joins.<br>
+        <strong>Gold</strong>: Final fact/dim tables for consumption.</div>
+      </div>
+      <div class="card accent2-top" style="margin-bottom:0.8rem;">
+        <div class="card-icon">📛</div>
+        <div class="card-title">Consistent naming</div>
+        <div class="card-body"><code class="inline">bronze_</code>, <code class="inline">silver_</code>, <code class="inline">gold_</code> prefixes following the Medallion layers. Snake_case everywhere.</div>
+      </div>
+      <div class="card accent3-top">
+        <div class="card-icon">🔒</div>
+        <div class="card-title">Never hardcode</div>
+        <div class="card-body">Always use <code class="inline">{{ ref() }}</code> and <code class="inline">{{ source() }}</code>. Use <code class="inline">env_var()</code> for secrets.</div>
+      </div>
+      <div class="card accent2-top">
+        <div class="card-icon">🌿</div>
+        <div class="card-title">One model, one concern</div>
+        <div class="card-body">Keep models focused. A 500-line model with 15 joins is a future debugging nightmare.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 25 — WHAT WE'LL BUILD
+═══════════════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 27 — GITHUB & GIT COMMANDS
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s27">
+  <div class="slide-header">
+    <div class="section-tag">Version Control</div>
+    <h2 class="slide-title">Essential Git Commands</h2>
+    <p class="slide-subtitle">The 10 commands you'll use every day</p>
+  </div>
+  <div class="grid-2" style="align-items:start;">
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.6rem;">Setup & basics</p>
+<pre><code class="language-bash"># Clone a repo to your machine
+git clone https://github.com/user/repo.git
+
+# Check what's changed
+git status
+
+# See the commit history
+git log --oneline</code></pre>
+      <p style="font-size:0.82rem;color:var(--muted);margin:0.8rem 0 0.6rem;">Save your work</p>
+<pre><code class="language-bash"># Stage all changes
+git add .
+
+# Commit with a message
+git commit -m "add gold_orders model"
+
+# Push to GitHub
+git push origin main</code></pre>
+    </div>
+    <div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.6rem;">Branching workflow</p>
+<pre><code class="language-bash"># Create and switch to a new branch
+git checkout -b feat/add-supplier-model
+
+# Switch between branches
+git checkout main
+
+# Merge a branch into main
+git merge feat/add-supplier-model
+
+# Pull latest changes from GitHub
+git pull origin main</code></pre>
+      <div class="callout" style="margin-top:0.8rem;font-size:0.82rem;">
+        <span>🌿</span>
+        <span><strong>Rule of thumb:</strong> never commit directly to <code class="inline">main</code>. Always create a feature branch, do your work, open a Pull Request, and merge after review.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="slide" id="s28">
+  <div class="slide-header">
+    <div class="section-tag">Course Plan</div>
+    <h2 class="slide-title">What We'll Build This Week</h2>
+    <p class="slide-subtitle">A full analytics pipeline on TPC-H data in Snowflake</p>
+  </div>
+  <div class="grid-2" style="align-items:start;gap:1rem;">
+    <div>
+      <div class="dag-row" style="margin-bottom:0.5rem;">
+        <div class="dag-node source" style="font-size:0.75rem;">TPCH_SF1.ORDERS</div>
+        <div class="dag-node source" style="font-size:0.75rem;">TPCH_SF1.CUSTOMER</div>
+        <div class="dag-node source" style="font-size:0.75rem;">TPCH_SF1.LINEITEM</div>
+      </div>
+      <div class="dag-row"><span style="color:var(--muted);font-size:0.8rem;">↓ bronze layer</span></div>
+      <div class="dag-row" style="margin-bottom:0.5rem;">
+        <div class="dag-node bronze" style="font-size:0.75rem;">bronze_tpch_orders</div>
+        <div class="dag-node bronze" style="font-size:0.75rem;">bronze_tpch_customers</div>
+        <div class="dag-node bronze" style="font-size:0.75rem;">bronze_tpch_lineitem</div>
+      </div>
+      <div class="dag-row"><span style="color:var(--muted);font-size:0.8rem;">↓ silver layer</span></div>
+      <div class="dag-row" style="margin-bottom:0.5rem;">
+        <div class="dag-node silver" style="font-size:0.75rem;">silver_orders_enriched</div>
+        <div class="dag-node silver" style="font-size:0.75rem;">silver_lineitem_daily</div>
+      </div>
+      <div class="dag-row"><span style="color:var(--muted);font-size:0.8rem;">↓ gold layer</span></div>
+      <div class="dag-row">
+        <div class="dag-node gold" style="font-size:0.75rem;">gold_orders</div>
+        <div class="dag-node gold" style="font-size:0.75rem;">gold_customers</div>
+        <div class="dag-node gold" style="font-size:0.75rem;">gold_daily_revenue</div>
+      </div>
+    </div>
+    <div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">D1</div>
+          <div class="step-content">
+            <div class="step-title">Setup & First Models</div>
+            <div class="step-desc">Snowflake + dbt Cloud + first bronze models</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">D2</div>
+          <div class="step-content">
+            <div class="step-title">Sources, Refs & Materializations</div>
+            <div class="step-desc">Full pipeline — bronze → silver → gold</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">D3</div>
+          <div class="step-content">
+            <div class="step-title">Tests, Documentation & Seeds</div>
+            <div class="step-desc">Data quality, auto-docs, dbt build</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">D4</div>
+          <div class="step-content">
+            <div class="step-title">Snapshots, Macros & Packages</div>
+            <div class="step-desc">SCD2 history + reusable Jinja + dbt_utils</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">D5</div>
+          <div class="step-content">
+            <div class="step-title">dbt Core, Snowflake Native App & CI/CD</div>
+            <div class="step-desc">Local CLI, dbt in Snowflake, Slim CI, capstone</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 26 — CLOSING
+═══════════════════════════════════════════════════════════ -->
+<div class="slide" id="s29" style="background:radial-gradient(ellipse at 70% 50%, rgba(78,205,196,0.12) 0%, transparent 60%), radial-gradient(ellipse at 30% 70%, rgba(255,107,53,0.10) 0%, transparent 55%), var(--bg);">
+  <div style="text-align:center;max-width:700px;">
+    <div style="font-size:0.75rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent2);margin-bottom:1.5rem;font-weight:600;">Let's build</div>
+    <h1 style="font-size:3.8rem;font-weight:800;letter-spacing:-0.03em;line-height:1.1;margin-bottom:1.2rem;">
+      <span style="color:var(--text)">Time to stop reading</span><br>
+      <span style="background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">and start building.</span>
+    </h1>
+    <p style="font-size:1.1rem;color:var(--muted);margin-bottom:2.5rem;line-height:1.7;">
+      Open the <code class="inline">exercises/</code> folder in your repository.<br>
+      Start with <strong style="color:var(--text)">Day 1 → Exercise 1</strong>.
+    </p>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;font-size:0.85rem;">
+      <a href="https://docs.getdbt.com" target="_blank" style="color:var(--accent2);text-decoration:none;border-bottom:1px solid rgba(78,205,196,0.3);padding-bottom:2px;">docs.getdbt.com ↗</a>
+      <a href="https://hub.getdbt.com" target="_blank" style="color:var(--accent2);text-decoration:none;border-bottom:1px solid rgba(78,205,196,0.3);padding-bottom:2px;">hub.getdbt.com ↗</a>
+      <a href="https://community.getdbt.com" target="_blank" style="color:var(--accent2);text-decoration:none;border-bottom:1px solid rgba(78,205,196,0.3);padding-bottom:2px;">community.getdbt.com ↗</a>
+    </div>
+    <div style="margin-top:3.5rem;font-size:0.8rem;color:var(--muted);">Slide 29 / 29 &nbsp;·&nbsp; End of theory session</div>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<div id="nav">
+  <button onclick="prevSlide()" title="Previous (←)">&#8592;</button>
+  <span id="slide-counter">1 / 29</span>
+  <button onclick="nextSlide()" title="Next (→)">&#8594;</button>
+</div>
+
+<script>
+hljs.highlightAll();
+
+const TOTAL = 29;
+let current = 1;
+
+function goTo(n) {
+  const prev = document.getElementById('s' + current);
+  prev.classList.remove('active');
+  prev.classList.add('exit-left');
+  setTimeout(() => prev.classList.remove('exit-left'), 500);
+
+  current = Math.max(1, Math.min(n, TOTAL));
+  const next = document.getElementById('s' + current);
+  next.classList.add('active');
+
+  document.getElementById('slide-counter').textContent = current + ' / ' + TOTAL;
+  document.getElementById('slide-num-badge').textContent = current + ' / ' + TOTAL;
+  document.getElementById('progress-bar').style.width = (current / TOTAL * 100) + '%';
+}
+
+function nextSlide() { goTo(current + 1); }
+function prevSlide() { goTo(current - 1); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); nextSlide(); }
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                     { e.preventDefault(); prevSlide(); }
+  if (e.key === 'Home') goTo(1);
+  if (e.key === 'End')  goTo(TOTAL);
+});
+
+let touchStartX = 0;
+document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; });
+document.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  if (Math.abs(dx) > 50) { dx < 0 ? nextSlide() : prevSlide(); }
+});
+
+document.getElementById('progress-bar').style.width = (1 / TOTAL * 100) + '%';
+document.getElementById('slide-num-badge').textContent = '1 / ' + TOTAL;
+</script>
+</body>
+<
