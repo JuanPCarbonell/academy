@@ -13,9 +13,9 @@ Understand how each materialization behaves in practice by running the same mode
 
 Your bronze models are currently configured as `view` in `dbt_project.yml`. Let's compare.
 
-**Step 1:** Run `bronze_tpch_lineitem` (6M rows) and time it:
+**Step 1:** Run `bronze_tpch_lineitem` (6M rows) and nota el tiempo que aparece en el log:
 ```bash
-time dbt run --select bronze_tpch_lineitem
+dbt run --select bronze_tpch_lineitem
 ```
 
 **Step 2:** Override the materialization to `table` at the top of `bronze_tpch_lineitem.sql`:
@@ -29,15 +29,53 @@ Run it again and compare. Also query downstream from both in Snowflake — which
 
 **Step 3:** Remove the config block (revert to `view`).
 
-**Question:** `bronze_tpch_orders` has 1.5M rows. Would you ever materialize a bronze model as a table? What would be the trade-off?
-
 ---
 
 ## Part B — Ephemeral Model
 
 > *Guided — follow along, full solution shown.*
 
-Create `models/silver/silver_lineitem_totals.sql` as an ephemeral model:
+**Step 1 — Build a market segment summary.**
+
+Create `models/gold/gold_market_summary.sql`. It should show, per market segment, total orders, total revenue, and average order value:
+
+```sql
+WITH line_totals AS (
+    SELECT
+        order_id,
+        SUM(net_price) AS net_revenue
+    FROM {{ ref('bronze_tpch_lineitem') }}
+    GROUP BY 1
+),
+orders AS (
+    SELECT * FROM {{ ref('bronze_tpch_orders') }}
+),
+customers AS (
+    SELECT * FROM {{ ref('bronze_tpch_customers') }}
+)
+
+SELECT
+    c.market_segment,
+    COUNT(DISTINCT o.order_id)                AS total_orders,
+    SUM(l.net_revenue)                        AS total_revenue,
+    SUM(l.net_revenue) /
+        NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value
+FROM orders o
+JOIN customers c   ON o.customer_id = c.customer_id
+JOIN line_totals l ON o.order_id    = l.order_id
+GROUP BY 1
+```
+
+Run it:
+```bash
+dbt run --select gold_market_summary
+```
+
+**Step 2 — Introduce the ephemeral materialization.**
+
+The `line_totals` aggregation is an intermediate step — it doesn't belong in bronze, silver, or gold, and you wouldn't expose it to analysts. This is the use case for `ephemeral`: a model that exists in code but never creates an object in the warehouse.
+
+Extract it to `models/silver/silver_lineitem_totals.sql`:
 
 ```sql
 {{ config(materialized='ephemeral') }}
@@ -51,17 +89,23 @@ FROM {{ ref('bronze_tpch_lineitem') }}
 GROUP BY 1
 ```
 
-Update `silver_orders_enriched.sql` to use `{{ ref('silver_lineitem_totals') }}` instead of the inline CTE `line_totals` you wrote earlier.
+Update `silver_orders_enriched.sql` and `gold_market_summary.sql` to replace their inline `line_totals` CTE with:
 
-Run:
+```sql
+line_totals AS (
+    SELECT * FROM {{ ref('silver_lineitem_totals') }}
+),
+```
+
+Run both:
 ```bash
-dbt run --select silver_orders_enriched
+dbt run --select silver_orders_enriched gold_market_summary
 ```
 
 **Questions:**
 1. Does `silver_lineitem_totals` appear as a table or view in Snowflake? Why not?
-2. Open `silver_orders_enriched.sql` in the Cloud IDE and click **Compile**. What did dbt do with the ephemeral model?
-3. What is the trade-off between ephemeral and a regular view?
+2. Open `silver_orders_enriched.sql` and click **Compile**. What happened to the ephemeral model in the compiled SQL?
+3. What is the trade-off between ephemeral and a regular view? When would you choose each?
 
 ---
 
@@ -88,25 +132,50 @@ Run it a second time and observe the **Query History** in Snowflake. What SQL do
 
 > *Practice — write this yourself.*
 
-Add a new model `models/gold/gold_nations_summary.sql`:
+`dbt_project.yml` sets `gold: +materialized: table` for the entire folder. But some gold models are small lookup aggregations that don't need to be rebuilt on every run — a view is fine.
 
+Create `models/gold/gold_nations_summary.sql` that shows total revenue and order count by country:
+
+- Join `silver_orders_enriched` with `bronze_tpch_nations`
+- Group by `nation_name`
+- Include: `nation_name`, `total_orders`, `total_revenue`, `avg_order_value`
+
+Configure it as a **view** using two different approaches — implement it both ways and observe the result:
+
+**Option 1 — inline config block** (takes precedence over `dbt_project.yml`):
+```sql
+{{ config(materialized='view') }}
 ```
-# Your solution here
+
+**Option 2 — `dbt_project.yml`** (useful when you want to override many models at once without touching each file):
+```yaml
+models:
+  my_new_project:
+    gold:
+      +materialized: table
+      gold_nations_summary:  # per-model override
+        +materialized: view
 ```
 
-Configure it as a **view** even though the rest of `gold/` uses `table`. Do this two ways:
+Run and verify:
+```bash
+dbt run --select gold_nations_summary
+```
 
-1. Via a `{{ config() }}` block inside the model file
-2. Via `dbt_project.yml` with a per-model config under `+config`
+```sql
+-- Should appear under VIEWS, not TABLES
+SHOW VIEWS IN SCHEMA ANALYTICS.GOLD;
+```
 
-Which approach do you prefer and why?
+**Question:** Between the inline `{{ config() }}` block and `dbt_project.yml`, which approach would you use in a team setting where multiple people work on the same project? Why?
 
 ---
 
 ## ✅ Success Criteria
 
-- [ ] You measured the speed difference between view and table on 6M-row lineitem
+- [ ] You measured the speed difference between view and table on `bronze_tpch_lineitem`
+- [ ] `gold_market_summary` produces 5 rows (one per market segment) with correct totals
 - [ ] `silver_lineitem_totals` is ephemeral and does not appear in Snowflake
-- [ ] `silver_orders_enriched` uses the ephemeral model and produces correct results
+- [ ] Both `silver_orders_enriched` and `gold_market_summary` use `{{ ref('silver_lineitem_totals') }}` — no duplicated CTEs
 - [ ] `gold_customers` is materialized as a table
 - [ ] `gold_nations_summary` is overridden to `view`

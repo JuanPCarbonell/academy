@@ -7,27 +7,19 @@ Build `gold_orders` as an incremental model. Understand when dbt applies the inc
 
 ---
 
-## Part A — Create gold_orders as a Table First
+## Part A — Add a loaded_at Timestamp
 
 > *Guided — follow along, full solution shown.*
 
-Before going incremental, build `models/gold/gold_orders.sql` as a plain `table` to understand the base query:
+You already have `gold_orders` as a table from Exercise 1. Before converting it to incremental, add one column: `loaded_at`. This timestamp records when each row was last written — essential for auditing and for the incremental filter you'll add next.
+
+Open `models/gold/gold_orders.sql` and add `CURRENT_TIMESTAMP() AS loaded_at` at the end of the SELECT:
 
 ```sql
 {{ config(materialized='table') }}
 
 SELECT
-    order_id,
-    order_date,
-    order_status,
-    order_priority,
-    customer_id,
-    customer_name,
-    market_segment,
-    nation_name,
-    total_items,
-    gross_revenue,
-    net_revenue,
+    *,
     gross_revenue - net_revenue                                     AS discount_amount,
     ROUND(
         (gross_revenue - net_revenue) / NULLIF(gross_revenue, 0),
@@ -39,19 +31,13 @@ SELECT
         WHEN total_items >= 3 THEN 'Medium'
         ELSE 'Small'
     END                                                             AS order_size_band,
-    RANK() OVER (ORDER BY net_revenue DESC)                         AS revenue_rank,
     CURRENT_TIMESTAMP()                                             AS loaded_at
 FROM {{ ref('silver_orders_enriched') }}
 ```
 
-Run and verify row count:
+Run:
 ```bash
 dbt run --select gold_orders
-```
-
-```sql
-SELECT COUNT(*) FROM ANALYTICS.GOLD.GOLD_ORDERS;
--- Expected: 1,500,000
 ```
 
 ---
@@ -69,17 +55,7 @@ Change the config to `incremental` and add the filter:
 ) }}
 
 SELECT
-    order_id,
-    order_date,
-    order_status,
-    order_priority,
-    customer_id,
-    customer_name,
-    market_segment,
-    nation_name,
-    total_items,
-    gross_revenue,
-    net_revenue,
+    *,
     gross_revenue - net_revenue                                     AS discount_amount,
     ROUND(
         (gross_revenue - net_revenue) / NULLIF(gross_revenue, 0),
@@ -99,7 +75,6 @@ FROM {{ ref('silver_orders_enriched') }}
 {% endif %}
 ```
 
-> **Notice:** `revenue_rank` is absent from the incremental version. A window function that ranks across all rows breaks in an incremental model — on each run it would only rank the new rows, not the full dataset.
 
 Run it (first incremental run = full load, same as table):
 ```bash
@@ -122,9 +97,11 @@ dbt run --select gold_orders
 
 > *Guided — follow along, full solution shown.*
 
-In the Cloud IDE, open `gold_orders.sql` and click **Compile**.
+Open `gold_orders.sql` in the Cloud IDE and click **Compile**. Look at the compiled output.
 
-Find the `WHERE` clause in the compiled output. Then switch to Snowflake Query History and find the actual `MERGE` or `INSERT` statement dbt ran. What is the difference between `unique_key` with `MERGE` vs without it?
+**Questions:**
+1. The compiled SQL contains a `WHERE` clause even though you didn't write one. Where does it come from and when does dbt include it?
+2. The log shows dbt ran a `MERGE` statement. What would happen if you removed `unique_key = 'order_id'` from the config and the same order appeared in two consecutive runs?
 
 ---
 
@@ -137,9 +114,8 @@ dbt run --select gold_orders --full-refresh
 ```
 
 **Questions:**
-1. When would you need `--full-refresh` in production?
-2. If a bug in `silver_orders_enriched` corrupted data for 3 months, what is the recovery process?
-3. The table version of `gold_orders` includes `revenue_rank` but the incremental version does not. Why? How would you handle a column like this in a production incremental model?
+1. Your filter uses `WHERE order_date > (SELECT MAX(order_date) FROM {{ this }})`. You change the `order_size_band` thresholds and run the model without `--full-refresh`. Which rows get the new band values?
+2. A source system sent orders with backdated `order_date` values — 2 weeks in the past. Will the incremental filter pick them up? What do you do?
 
 ---
 

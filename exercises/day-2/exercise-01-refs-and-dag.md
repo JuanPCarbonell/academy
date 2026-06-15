@@ -152,12 +152,9 @@ Create `models/gold/gold_orders.sql`.
   - `'Large'` if `total_items >= 5`
   - `'Medium'` if `total_items >= 3`
   - `'Small'` otherwise
-- `revenue_rank`: rank every order by `net_revenue` descending (1 = highest revenue order)
 - Materialize as `table` using an in-file config block
 
-**Hints:**
-- Use `NULLIF(denominator, 0)` to safely handle division
-- `RANK()` is a window function: `RANK() OVER (ORDER BY ... DESC)`
+**Hint:** Use `NULLIF(denominator, 0)` to safely handle division.
 
 **Question:** Why does it make sense to materialize gold models as tables rather than views? What would happen to dashboard performance if gold were a view that sat on top of silver, which sat on top of four bronze views?
 
