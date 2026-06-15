@@ -28,8 +28,19 @@ SELECT
     total_items,
     gross_revenue,
     net_revenue,
-    net_revenue / NULLIF(total_items, 0) AS revenue_per_item,
-    CURRENT_TIMESTAMP()                  AS loaded_at
+    gross_revenue - net_revenue                                     AS discount_amount,
+    ROUND(
+        (gross_revenue - net_revenue) / NULLIF(gross_revenue, 0),
+        4
+    )                                                               AS effective_discount_rate,
+    net_revenue / NULLIF(total_items, 0)                            AS revenue_per_item,
+    CASE
+        WHEN total_items >= 5 THEN 'Large'
+        WHEN total_items >= 3 THEN 'Medium'
+        ELSE 'Small'
+    END                                                             AS order_size_band,
+    RANK() OVER (ORDER BY net_revenue DESC)                         AS revenue_rank,
+    CURRENT_TIMESTAMP()                                             AS loaded_at
 FROM {{ ref('silver_orders_enriched') }}
 ```
 
@@ -69,14 +80,26 @@ SELECT
     total_items,
     gross_revenue,
     net_revenue,
-    net_revenue / NULLIF(total_items, 0) AS revenue_per_item,
-    CURRENT_TIMESTAMP()                  AS loaded_at
+    gross_revenue - net_revenue                                     AS discount_amount,
+    ROUND(
+        (gross_revenue - net_revenue) / NULLIF(gross_revenue, 0),
+        4
+    )                                                               AS effective_discount_rate,
+    net_revenue / NULLIF(total_items, 0)                            AS revenue_per_item,
+    CASE
+        WHEN total_items >= 5 THEN 'Large'
+        WHEN total_items >= 3 THEN 'Medium'
+        ELSE 'Small'
+    END                                                             AS order_size_band,
+    CURRENT_TIMESTAMP()                                             AS loaded_at
 FROM {{ ref('silver_orders_enriched') }}
 
 {% if is_incremental() %}
     WHERE order_date > (SELECT MAX(order_date) FROM {{ this }})
 {% endif %}
 ```
+
+> **Notice:** `revenue_rank` is absent from the incremental version. A window function that ranks across all rows breaks in an incremental model — on each run it would only rank the new rows, not the full dataset.
 
 Run it (first incremental run = full load, same as table):
 ```bash
@@ -116,6 +139,7 @@ dbt run --select gold_orders --full-refresh
 **Questions:**
 1. When would you need `--full-refresh` in production?
 2. If a bug in `silver_orders_enriched` corrupted data for 3 months, what is the recovery process?
+3. The table version of `gold_orders` includes `revenue_rank` but the incremental version does not. Why? How would you handle a column like this in a production incremental model?
 
 ---
 

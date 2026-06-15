@@ -70,10 +70,11 @@ Use it in `gold_customers.sql` when calculating average order value:
 {{ safe_divide('total_revenue', 'total_orders') }} AS avg_order_value
 ```
 
-And in `gold_orders.sql` for revenue per item:
+And in `gold_orders.sql` for both division columns:
 
 ```sql
-{{ safe_divide('net_revenue', 'total_items') }} AS revenue_per_item
+{{ safe_divide('net_revenue', 'total_items') }}                         AS revenue_per_item,
+{{ safe_divide('gross_revenue - net_revenue', 'gross_revenue', 0) }}    AS effective_discount_rate,
 ```
 
 ---
