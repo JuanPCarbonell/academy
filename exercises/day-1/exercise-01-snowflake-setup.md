@@ -54,7 +54,7 @@ CREATE USER IF NOT EXISTS DBT_USER
     DEFAULT_WAREHOUSE = DBT_WH
     MUST_CHANGE_PASSWORD = FALSE;
 
-GRANT ROLE TRANSFORMER TO USER DBT_USER
+GRANT ROLE TRANSFORMER TO USER DBT_USER;
 ```
 
 > **Note:** In production you would use key-pair authentication instead of a password.
