@@ -144,15 +144,22 @@ Create `models/gold/gold_orders.sql`.
 
 **Requirements:**
 - Use `{{ ref('silver_orders_enriched') }}`
-- One row per order, all fields from silver
-- Add `revenue_per_item`: `net_revenue / total_items`
-- Materialize as `table` using an in-file config:
+- One row per order, all fields from silver plus:
+- `discount_amount`: total discount given — difference between gross and net revenue
+- `effective_discount_rate`: `discount_amount / gross_revenue`, rounded to 4 decimal places — protect against division by zero
+- `revenue_per_item`: `net_revenue / total_items` — protect against division by zero
+- `order_size_band`:
+  - `'Large'` if `total_items >= 5`
+  - `'Medium'` if `total_items >= 3`
+  - `'Small'` otherwise
+- `revenue_rank`: rank every order by `net_revenue` descending (1 = highest revenue order)
+- Materialize as `table` using an in-file config block
 
-```
-# Your solution here
-```
+**Hints:**
+- Use `NULLIF(denominator, 0)` to safely handle division
+- `RANK()` is a window function: `RANK() OVER (ORDER BY ... DESC)`
 
-**Question:** Why does it make sense to materialize gold models as tables rather than views?
+**Question:** Why does it make sense to materialize gold models as tables rather than views? What would happen to dashboard performance if gold were a view that sat on top of silver, which sat on top of four bronze views?
 
 ---
 
