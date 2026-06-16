@@ -46,8 +46,8 @@ This test validates that the sum of `net_price` in `bronze_tpch_lineitem` per or
 ```
 
 Run it:
-```
-# Your solution here
+```bash
+dbt test --select assert_lineitem_revenue_matches_orders
 ```
 
 If rows are returned, investigate: is it a rounding issue or a join problem?
@@ -64,6 +64,11 @@ Create `tests/assert_all_orders_have_customers.sql`:
 # Your solution here
 ```
 
+Run it:
+```bash
+dbt test --select assert_all_orders_have_customers
+```
+
 ---
 
 ## Part D — Parameterize a Singular Test with Variables
@@ -73,26 +78,27 @@ Create `tests/assert_all_orders_have_customers.sql`:
 dbt variables let you make tests configurable. Create `tests/assert_minimum_order_revenue.sql`:
 
 ```sql
--- Orders below a minimum revenue threshold are suspicious.
+-- Finds orders below a minimum revenue threshold.
+-- A failing test tells you how many orders are below the threshold — useful for investigation.
 -- Override threshold with: dbt test --vars '{"min_order_revenue": 1000}'
 SELECT
     order_id,
     net_revenue
 FROM {{ ref('gold_orders') }}
-WHERE net_revenue < {{ var('min_order_revenue', 0.01) }}
+WHERE net_revenue < {{ var('min_order_revenue', 100) }}
 ```
 
-Run with the default:
+Run with the default threshold ($100) — passes on clean TPC-H data:
 ```bash
 dbt test --select assert_minimum_order_revenue
 ```
 
-Run with a custom threshold:
+Now raise the threshold to investigate how many orders fall below $1000:
 ```bash
-dbt test --select assert_minimum_order_revenue --vars '{"min_order_revenue": 500}'
+dbt test --select assert_minimum_order_revenue --vars '{"min_order_revenue": 1000}'
 ```
 
-**Question:** How many orders fall below $500 net revenue?
+**Question:** How many orders fall below $1000? What does `--vars` allow you to do without changing the SQL file?
 
 ---
 

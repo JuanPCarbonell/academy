@@ -42,31 +42,22 @@ Create `models/docs.md`:
 
 ```markdown
 {% docs customer_tier %}
-Customer tier based on lifetime order count:
-
-| Tier | Criteria |
-|---|---|
-| Platinum | 10 or more orders |
-| Gold | 3–9 orders |
-| Silver | 1–2 orders |
-| No Orders | Registered but never ordered |
-
-Used for segmentation in the `gold_customers` model.
+Segmentation tier based on lifetime net revenue. Platinum: over 500000. Gold: over 100000. Silver: any revenue. No Orders: never purchased.
 {% enddocs %}
 
 {% docs net_revenue %}
-Total order value in USD, computed as the sum of all line item totals
-(quantity × unit_price) for the order. Does not include taxes or shipping.
-Amounts are stored in USD regardless of the customer's country.
+Total order value in USD after discounts. Sum of net_price across all line items for the order.
 {% enddocs %}
 ```
 
-Reference the doc blocks in your `schema.yml`:
+Reference the doc blocks in `models/gold/schema.yml` — `customer_tier` belongs to `gold_customers` and `net_revenue` belongs to `gold_orders`:
 
 ```yaml
+# in gold_customers
 - name: customer_tier
   description: "{{ doc('customer_tier') }}"
 
+# in gold_orders
 - name: net_revenue
   description: "{{ doc('net_revenue') }}"
 ```
@@ -77,7 +68,6 @@ Reference the doc blocks in your `schema.yml`:
 
 ```bash
 dbt docs generate
-dbt docs serve
 ```
 
 Navigate to:
@@ -92,23 +82,16 @@ Navigate to:
 
 ---
 
-## Part D — Add a Model-level Description with Markdown
+## Part D — Add a Model-level Description
 
-For `gold_orders`, write a rich description:
+For `gold_orders`, add a plain-text description that will persist cleanly to Snowflake:
 
 ```yaml
 - name: gold_orders
-  description: |
-    **Fact table — one row per order.**
-
-    The primary analytics-ready table for order analysis. Aggregates
-    TPC-H orders with customer, nation, and line item data into one row.
-
-    **Grain:** One row per `order_id`.
-
-    **Order status:** `O` = open, `F` = fulfilled, `P` = processing.
-
-    **Refresh:** Incremental — only processes new orders on each run.
+  description: >
+    Fact table with one row per order. Aggregates TPC-H orders with customer,
+    nation, and line item data. Order status values: O = open, F = fulfilled,
+    P = processing. Materialized as an incremental table, updated on each run.
 ```
 
 ---

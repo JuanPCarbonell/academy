@@ -132,7 +132,7 @@ Run it a second time and observe the **Query History** in Snowflake. What SQL do
 
 > *Practice — write this yourself.*
 
-`dbt_project.yml` sets `gold: +materialized: table` for the entire folder. But some gold models are small lookup aggregations that don't need to be rebuilt on every run — a view is fine.
+`dbt_project.yml` sets `gold: +materialized: table` for the entire folder. But materializing as a table means dbt scans and stores the data physically on every `dbt run` — that cost is only justified for large or expensive models. `gold_nations_summary` aggregates 25 countries: querying it as a view is essentially free, so there's no reason to pay the scan cost on every run.
 
 Create `models/gold/gold_nations_summary.sql` that shows total revenue and order count by country:
 

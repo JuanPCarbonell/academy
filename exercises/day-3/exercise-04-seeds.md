@@ -16,10 +16,10 @@ Seeds are CSV files that dbt manages as tables in your warehouse. They are meant
 
 Seeds are **not** for large datasets, data that updates frequently, or anything that originates in a source system (use `{{ source() }}` for that).
 
-The `customers_seed.csv` file lives in `seeds/`. Open it and inspect the columns:
+The instructor has provided `customers_seed.csv` in the Day 3 exercise folder — copy it into the `seeds/` folder of your dbt project. Open it and inspect the columns:
 
 ```
-customer_id, first_name, last_name, email, country, updated_at
+customer_id, first_name, last_name, email, country, account_balance, updated_at
 ```
 
 This table has 30 rows — a small, controlled dataset you can mutate directly in Snowflake to simulate real-world profile changes. That's exactly what makes it useful for the snapshots exercise tomorrow.
@@ -32,15 +32,34 @@ This table has 30 rows — a small, controlled dataset you can mutate directly i
 
 Seeds don't go to `BRONZE` — they represent data that lands directly in the warehouse, like an ingestion tool would. The convention is to put them in `RAW`.
 
-Open `dbt_project.yml` and add the seeds configuration below the existing `models:` block:
+Open `dbt_project.yml` and add the seeds block below `models:`. Include `column_types` to avoid that dbt store everything as `VARCHAR`:
 
 ```yaml
 seeds:
   my_new_project:
     +schema: raw
+    +column_types:
+      customer_id: integer
+      account_balance: float
 ```
 
-This tells dbt to materialize all seeds into the `RAW` schema. You only need to add this once — any future seeds will also land here automatically.
+Without `column_types`, dbt infers all CSV columns as `VARCHAR` — which will cause type mismatch errors tomorrow when the snapshot joins `customer_id` as a string against integer keys.
+
+To also persist descriptions to Snowflake as column comments, add `persist_docs`:
+
+```yaml
+seeds:
+  my_new_project:
+    +schema: raw
+    +column_types:
+      customer_id: integer
+      account_balance: float
+    +persist_docs:
+      relation: true
+      columns: true
+```
+
+With `persist_docs`, run `dbt seed --full-refresh` — Snowflake needs to recreate the table to apply the comments.
 
 ---
 
@@ -61,7 +80,12 @@ Verify it loaded:
 SELECT * FROM ANALYTICS.RAW.CUSTOMERS_SEED LIMIT 5;
 ```
 
-You should see 30 rows with customer profiles including `updated_at` timestamps.
+Check column types:
+```sql
+SHOW COLUMNS IN TABLE ANALYTICS.RAW.CUSTOMERS_SEED;
+```
+
+`customer_id` should be `NUMBER` and `account_balance` should be `FLOAT` — not `TEXT`.
 
 **Questions:**
 1. Which schema did the seed land in? Why `RAW` and not `BRONZE`?
@@ -69,34 +93,28 @@ You should see 30 rows with customer profiles including `updated_at` timestamps.
 
 ---
 
-## Part D — Inspect the seeds.yml Configuration
+## Part D — Add a seeds.yml
 
 > *Guided — follow along, full solution shown.*
 
-Open `seeds/seeds.yml`. Notice:
+Create `seeds/seeds.yml` to add descriptions — the column types are already handled by `dbt_project.yml`:
 
 ```yaml
+version: 2
+
 seeds:
   - name: customers_seed
-    description: "30 customer profiles used for SCD Type 2 snapshot exercises."
+    description: "30 customer profiles used for the SCD Type 2 snapshot exercise on Day 4."
     columns:
       - name: customer_id
-        description: "Primary key"
+        description: "Primary key."
+      - name: account_balance
+        description: "Current account balance in USD."
       - name: updated_at
-        description: "Last profile update timestamp — used by the timestamp snapshot strategy"
+        description: "Timestamp of the last profile update. Used by the snapshot strategy to detect changes."
 ```
 
-By default, dbt infers all column types as `VARCHAR`. You can override this with `column_types` in the config block:
-
-```yaml
-  - name: customers_seed
-    config:
-      column_types:
-        customer_id: integer
-        account_balance: float
-```
-
-**Question:** Open the seed table in Snowflake and check the actual column types dbt chose. Is `customer_id` stored as `VARCHAR` or `INTEGER`? Does it matter for this exercise?
+Run `dbt seed` again and verify nothing broke.
 
 ---
 
@@ -106,16 +124,14 @@ By default, dbt infers all column types as `VARCHAR`. You can override this with
 
 Seeds have a narrow, well-defined use case. For each scenario below, decide: **seed**, **source**, or **neither** — and write one sentence of reasoning.
 
-1. A CSV with 50 currency exchange rates, updated every business day
-2. A list of 200 internal cost centers, updated quarterly by Finance
-3. A 10-row table mapping order status codes (`O`, `F`, `P`) to readable labels
-4. 3 years of historical sales transactions exported from a legacy ERP
+1. A 3-row CSV you maintain in git mapping order status codes (`O`, `F`, `P`) to readable labels
+2. A list of 200 internal cost centers, updated quarterly by Finance and delivered as a CSV
+3. Currency exchange rates that an Airflow pipeline loads into Snowflake every morning from a third-party API
+4. 3 years of historical sales transactions sitting in a 10M-row CSV on a local machine
 
 ---
 
 ## ✅ Success Criteria
 
 - [ ] `customers_seed` table exists in `ANALYTICS.RAW`
-- [ ] `dbt seed` runs without errors
-- [ ] You can explain when to use seeds vs sources
-- [ ] `seeds:` block with `+schema: raw` is configured in `dbt_project.yml`
+- [ ] `d

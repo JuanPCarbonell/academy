@@ -69,25 +69,33 @@ dbt build --select +gold_orders+
 
 ## Part C — Tag Selectors
 
-In Exercise 2 you added `+tags: ['bronze', 'daily']` to the bronze folder in `dbt_project.yml`. Use it:
+Add tags to all layers in `dbt_project.yml`:
+
+```yaml
+models:
+  my_new_project:
+    bronze:
+      +materialized: view
+      +schema: bronze
+      +tags: ['bronze', 'daily']
+    silver:
+      +materialized: view
+      +schema: silver
+      +tags: ['silver', 'daily']
+    gold:
+      +materialized: table
+      +schema: gold
+      +persist_docs:
+        relation: true
+        columns: true
+      +tags: ['gold', 'daily']
+```
+
+Now select by tag:
 
 ```bash
 dbt build --select tag:bronze
-dbt build --select tag:daily
-```
-
-Now add a `gold` tag to the gold folder:
-
-```yaml
-gold:
-  +materialized: table
-  +schema: gold
-  +tags: ['gold', 'daily']
-```
-
-Run all `daily` models:
-
-```bash
+dbt build --select tag:gold
 dbt build --select tag:daily
 ```
 
@@ -103,58 +111,13 @@ dbt build --exclude bronze_tpch_orders bronze_tpch_lineitem
 
 # Run bronze layer but skip a known-broken model
 dbt build --select bronze.* --exclude bronze_tpch_lineitem
-
-# Combine: all gold, but not the monthly revenue model
-dbt build --select gold.* --exclude gold_supplier_monthly_revenue
 ```
 
 **Task:** You need to run a full pipeline rebuild but skip the incremental `gold_orders` (it takes too long). Write the `dbt build` command.
 
 ---
 
-## Part E — State-Based Selection (Preview)
-
-In Day 5 you'll use this in CI. Here's the concept:
-
-```bash
-# First, create a production manifest to compare against
-dbt compile --target prod
-cp target/manifest.json prod-manifest.json
-
-# Now select only models that changed vs that manifest
-dbt build --select state:modified+ \
-           --state path/to/prod-manifest/
-```
-
-This is called **Slim CI**: instead of running your entire project on every PR, you run only the modified models and their downstream dependents.
-
-**Task:** Read the dbt docs page on [state-based selection](https://docs.getdbt.com/reference/node-selection/methods#the-state-method). Answer:
-- What does `state:new` select?
-- What does `state:modified.body` select?
-- Why is `--defer` useful alongside `--state`?
-
----
-
-## Part F — The Result Selector
-
-After a run with failures, re-run only the failed nodes:
-
-```bash
-# First run (some tests may fail)
-dbt build
-
-# Re-run only what failed last time
-dbt build --select result:fail --state ./target
-
-# Re-run failed + their downstream
-dbt build --select result:fail+ --state ./target
-```
-
-This is invaluable when debugging: you fix the root cause and re-run only the affected subgraph.
-
----
-
-## Part G — Practical Scenarios
+## Part E — Practical Scenarios
 
 Write the correct `dbt build` command for each scenario:
 
@@ -171,5 +134,4 @@ Write the correct `dbt build` command for each scenario:
 - [ ] `dbt build` runs the full project and all tests pass
 - [ ] You can select by path, tag, graph operator (`+model`, `model+`), and `--exclude`
 - [ ] You added a `gold` tag in `dbt_project.yml` and verified `--select tag:gold` works
-- [ ] You can write correct commands for all 5 scenarios in Part G
-- [ ] You can explain the difference between `state:modified` and `result:fail`
+- [ ] You can write correct commands for all 5 scenarios in Part E
