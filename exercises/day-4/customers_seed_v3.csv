@@ -1,0 +1,36 @@
+customer_id,first_name,last_name,email,country,account_balance,updated_at
+1,James,Wilson,james.wilson@email.com,United States,9500.00,2024-11-01 08:00:00
+2,Sofia,Garcia,sofia.garcia@email.com,Spain,1850.75,2024-01-20 11:30:00
+3,Luca,Rossi,luca.rossi@email.com,Italy,3100.00,2024-02-03 14:00:00
+4,Emma,Müller,emma.muller@email.com,Germany,7500.25,2024-02-10 08:45:00
+5,Noah,Smith,noah.smith@email.com,United Kingdom,2200.00,2024-02-18 16:20:00
+6,Yuki,Tanaka,yuki.tanaka@email.com,Japan,5400.80,2024-03-01 10:00:00
+7,Amara,Diallo,amara.diallo@email.com,France,980.50,2024-03-05 13:15:00
+8,Carlos,Mendez,carlos.mendez@email.com,Mexico,3300.00,2024-03-12 09:30:00
+9,Priya,Patel,priya.patel@email.com,India,1200.00,2024-03-20 15:00:00
+10,Oliver,Brown,oliver.brown@email.com,Australia,6700.90,2024-04-01 11:00:00
+11,Fatima,Al-Hassan,fatima.alhassan@email.com,UAE,8900.00,2024-04-08 14:30:00
+12,Wei,Zhang,wei.zhang@email.com,China,2100.40,2024-04-15 09:00:00
+13,Isabella,Costa,isabella.costa@email.com,Brazil,1500.60,2024-04-22 10:45:00
+14,Elias,Johansson,elias.johansson@email.com,Sweden,4400.00,2024-05-01 08:00:00
+15,Aisha,Okafor,aisha.okafor@email.com,Nigeria,750.25,2024-05-10 13:00:00
+16,Marco,Ferrari,marco.ferrari@email.com,Italy,3800.75,2024-05-15 16:30:00
+17,Hannah,Schneider,hannah.schneider@email.com,Germany,2900.00,2024-05-20 11:15:00
+18,Ravi,Kumar,ravi.kumar@email.com,India,1100.50,2024-06-01 09:30:00
+19,Chloe,Dubois,chloe.dubois@email.com,France,5200.00,2024-06-10 14:00:00
+20,Ethan,Johnson,ethan.johnson@email.com,United States,3600.80,2024-06-18 10:00:00
+21,Mia,Andersson,mia.andersson@email.com,Sweden,4100.00,2024-07-01 08:45:00
+22,Diego,Lopez,diego.lopez@email.com,Argentina,870.30,2024-07-08 13:30:00
+23,Sakura,Yamamoto,sakura.yamamoto@email.com,Japan,6300.00,2024-07-15 09:00:00
+24,Nia,Mensah,nia.mensah@email.com,Ghana,1400.00,2024-07-22 15:30:00
+25,Lucas,Martin,lucas.martin@email.com,France,2700.50,2024-08-01 11:00:00
+26,Zoe,Taylor,zoe.taylor@email.com,United Kingdom,5900.25,2024-08-10 14:15:00
+27,Arjun,Sharma,arjun.sharma@email.com,India,1650.00,2024-08-18 09:30:00
+28,Elena,Ivanova,elena.ivanova@email.com,Russia,3200.75,2024-09-01 10:00:00
+29,Samuel,Osei,samuel.osei@email.com,Ghana,980.00,2024-09-10 13:45:00
+30,Laura,Fernandez,laura.fernandez@email.com,Spain,4800.00,2024-09-20 08:00:00
+31,Kenji,Nakamura,kenji.nakamura@email.com,Japan,5100.00,2024-10-02 09:00:00
+32,Amina,Traoré,amina.traore@email.com,Senegal,1300.50,2024-10-05 11:30:00
+33,Pedro,Alves,pedro.alves@email.com,Brazil,2800.00,2024-10-10 14:00:00
+34,Claire,Dubois,claire.dubois@email.com,France,6200.75,2024-10-15 08:45:00
+35,Omar,Khalil,omar.khalil@email.com,Egypt,3700.00,2024-10-20 10:00:00
