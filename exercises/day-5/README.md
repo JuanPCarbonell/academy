@@ -16,7 +16,7 @@ The final day. You step outside the Cloud IDE and run dbt in two other environme
 | Exercise | Topic | Time |
 |---|---|---|
 | [01 — dbt Core Locally](exercise-01-dbt-core-local.md) | Install dbt Core, profiles.yml, CLI vs Cloud IDE | ~90 min |
-| [02 — dbt in Snowflake](exercise-02-dbt-in-snowflake.md) | dbt Snowflake Native App, run models from Snowflake UI | ~90 min |
+| [02 — dbt in Snowflake](exercise-02-dbt-in-snowflake.md) | Connect GitHub to Snowflake Workspaces, run models from Snowsight | ~45 min |
 | [03 — Jobs & Slim CI](exercise-03-jobs-and-slim-ci.md) | Production job, Slim CI, state-based selection | ~2 h |
 | [04 — Capstone](exercise-04-capstone.md) | Build supplier + parts analytics area independently | ~2.5 h |
 

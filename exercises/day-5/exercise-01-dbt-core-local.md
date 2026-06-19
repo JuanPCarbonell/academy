@@ -9,7 +9,25 @@ Run the same project you've been developing in dbt Cloud, but now from your loca
 
 ## Part A — Install dbt Core
 
+**Prerequisites — verify before starting:**
 ```bash
+python3 --version   # needs 3.9 or higher
+pip --version       # comes with Python
+git --version       # needs to be installed
+```
+
+If any of these are missing:
+
+- **Python**: download the installer from [python.org/downloads](https://www.python.org/downloads/). On Windows, tick *Add Python to PATH* during installation.
+- **pip**: comes bundled with Python 3.4+. If missing, run `python3 -m ensurepip --upgrade`.
+- **git**: download the installer from [git-scm.com/downloads](https://git-scm.com/downloads).
+
+```bash
+# Create and activate a virtual environment (keeps dbt isolated from system Python)
+python3 -m venv dbt-env
+source dbt-env/bin/activate        # macOS/Linux
+# dbt-env\Scripts\activate         # Windows
+
 # Install dbt with the Snowflake adapter
 pip install dbt-snowflake
 
@@ -28,54 +46,99 @@ cd dbt-academy
 
 ---
 
-## Part C — Configure profiles.yml
+## Part C — Create the Production Database in Snowflake
 
-This is the file dbt Cloud manages for you invisibly. Locally, you have to create it yourself.
+Before configuring local profiles, create the `PRODUCTION` database. The `ANALYTICS` database has been used for development all week — production needs its own isolated database.
 
-```bash
-# Create the dbt home directory if it doesn't exist
-mkdir -p ~/.dbt
+Run as `ACCOUNTADMIN` in Snowflake:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+-- Production database
+CREATE DATABASE IF NOT EXISTS PRODUCTION;
+
+-- Same schema structure as ANALYTICS
+CREATE SCHEMA IF NOT EXISTS PRODUCTION.RAW;
+CREATE SCHEMA IF NOT EXISTS PRODUCTION.BRONZE;
+CREATE SCHEMA IF NOT EXISTS PRODUCTION.SILVER;
+CREATE SCHEMA IF NOT EXISTS PRODUCTION.GOLD;
+CREATE SCHEMA IF NOT EXISTS PRODUCTION.SNAPSHOTS;
+CREATE SCHEMA IF NOT EXISTS PRODUCTION.DEFAULT;    -- fallback for models without +schema
+
+-- Grant TRANSFORMER full access
+GRANT ALL PRIVILEGES ON DATABASE PRODUCTION                   TO ROLE TRANSFORMER;
+GRANT ALL PRIVILEGES ON ALL SCHEMAS IN DATABASE PRODUCTION    TO ROLE TRANSFORMER;
+GRANT ALL PRIVILEGES ON FUTURE SCHEMAS IN DATABASE PRODUCTION TO ROLE TRANSFORMER;
+GRANT ALL PRIVILEGES ON ALL TABLES IN DATABASE PRODUCTION     TO ROLE TRANSFORMER;
+GRANT ALL PRIVILEGES ON FUTURE TABLES IN DATABASE PRODUCTION  TO ROLE TRANSFORMER;
+GRANT ALL PRIVILEGES ON ALL VIEWS IN DATABASE PRODUCTION      TO ROLE TRANSFORMER;
+GRANT ALL PRIVILEGES ON FUTURE VIEWS IN DATABASE PRODUCTION   TO ROLE TRANSFORMER;
 ```
 
-Create `~/.dbt/profiles.yml`:
+Verify access:
+```sql
+USE ROLE TRANSFORMER;
+SHOW SCHEMAS IN DATABASE PRODUCTION;
+-- Expected: RAW, BRONZE, SILVER, GOLD, SNAPSHOTS, DEFAULT
+```
+
+---
+
+## Part D — Configure profiles.yml
+
+This is the file dbt Cloud manages invisibly. Locally, dbt generates it interactively:
+
+```bash
+dbt init
+```
+
+dbt detects the existing `dbt_project.yml` and walks you through the connection setup. Fill in these values when prompted:
+
+| Field | Value |
+|---|---|
+| account | your Snowflake account identifier (e.g. `xy12345.eu-west-1`) |
+| user | `DBT_USER` |
+| password | `<your password>` |
+| role | `TRANSFORMER` |
+| database | `ANALYTICS` |
+| warehouse | `DBT_WH` |
+| schema | `default` |
+
+`dbt init` only generates the `dev` target. Open `~/.dbt/profiles.yml` and Add the `prod` target manually **inside `outputs:`**, at the same indentation level as `dev:`
+
+The final file should look like this:
 
 ```yaml
-my_new_project:
+default:
   target: dev
   outputs:
     dev:
       type: snowflake
-      account: <your_account>         # e.g. xy12345.eu-west-1
+      threads: 4
+      account: <YOUR ACCOUNT>
       user: DBT_USER
-      password: "{{ env_var('DBT_PASSWORD') }}"
-      role: TRANSFORMER
       database: ANALYTICS
       warehouse: DBT_WH
-      schema: dbt_dev_local_<your_name>   # fallback schema for models without a custom schema
-      threads: 4
+      schema: DEFAULT
+      password: <YOUR PASSWORD>
+      role: TRANSFORMER
 
     prod:
       type: snowflake
-      account: <your_account>
-      user: DBT_USER
-      password: "{{ env_var('DBT_PASSWORD') }}"
-      role: TRANSFORMER
-      database: ANALYTICS
-      warehouse: DBT_WH
-      schema: gold                        # production schemas come from dbt_project.yml
       threads: 8
+      account: <YOUR ACCOUNT>
+      user: DBT_USER
+      database: PRODUCTION
+      warehouse: DBT_WH
+      schema: DEFAULT
+      password: <YOUR PASSWORD>
+      role: TRANSFORMER
 ```
-
-```bash
-export DBT_PASSWORD="your_password_here"
-dbt debug   # should print: All checks passed!
-```
-
-Notice: the `prod` target uses a higher thread count. In dbt Cloud, this is configured per environment in the UI — same concept, different interface.
 
 ---
 
-## Part D — Run the Full Project
+## Part E — Run the Full Project
 
 ```bash
 dbt deps                    # install packages (creates dbt_packages/)
@@ -84,29 +147,29 @@ dbt run                     # build all models
 dbt test                    # run all tests
 ```
 
-Or in a single command:
-
-```bash
-dbt build
-```
-
 Check Snowflake: you should see models in `ANALYTICS.BRONZE, ANALYTICS.SILVER, and ANALYTICS.GOLD`.
 
 ---
 
-## Part E — Explore What dbt Cloud Was Hiding
+## Part F — Explore What dbt Cloud Was Hiding
 
-Locally you can see files that dbt Cloud manages transparently:
+After `dbt build` runs, dbt writes several files to the `target/` folder. First compile the project to generate them:
 
-```bash
-# The compiled SQL dbt sends to Snowflake
-cat target/compiled/dbt_academy/models/gold/gold_orders.sql
+```powershell
+dbt compile
+```
 
-# The run results with timing and row counts
-cat target/run_results.json | python3 -m json.tool | head -60
+Then explore:
 
-# The manifest — the full DAG as JSON (used by Slim CI)
-cat target/manifest.json | python3 -m json.tool | grep '"unique_id"' | head -20
+```powershell
+# Read the compiled SQL — the folder name matches name: in dbt_project.yml
+Get-Content "target\compiled\my_new_project\models\gold\gold_orders.sql"
+
+# Run results — timing and status per model
+(Get-Content target\run_results.json | ConvertFrom-Json).results | Select-Object unique_id, status, execution_time
+
+# The manifest — all nodes in the DAG
+(Get-Content target\manifest.json | ConvertFrom-Json).nodes.PSObject.Properties.Name | Select-Object -First 20
 ```
 
 **Questions:**
@@ -116,7 +179,7 @@ cat target/manifest.json | python3 -m json.tool | grep '"unique_id"' | head -20
 
 ---
 
-## Part F — Local vs Cloud: When to Use Each
+## Part G — Local vs Cloud: When to Use Each
 
 | Scenario | Local (dbt Core) | dbt Cloud IDE |
 |----------|-----------------|---------------|
@@ -132,19 +195,21 @@ cat target/manifest.json | python3 -m json.tool | grep '"unique_id"' | head -20
 
 ---
 
-## Part G — Override a Variable from the CLI
+## Part H — Switch Targets
 
-One advantage of local development: you can override project variables without changing any files.
+`profiles.yml` defines multiple targets (`dev` and `prod`). In dbt Cloud each environment is a separate UI configuration. Locally you switch with one flag — no UI, no redeployment:
 
 ```bash
-# Override the start_date var defined in dbt_project.yml
-dbt run --select gold_orders --vars '{"start_date": "2024-01-01"}'
+# Default: uses the dev target (dbt_dev_local_<your_name> schema)
+dbt run --select gold_orders
 
-# Run with full-refresh to rebuild an incremental model from scratch
-dbt run --select gold_orders --full-refresh
+# Switch to the prod target
+dbt run --select gold_orders --target prod
 ```
 
-Try both. Check the row count difference in Snowflake.
+Check Snowflake: the prod run should write to the schemas defined in `dbt_project.yml` (bronze, silver, gold) instead of your dev schema.
+
+**Question:** When would you use `--target prod` locally? What risks does it carry?
 
 ---
 

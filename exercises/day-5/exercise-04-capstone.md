@@ -2,161 +2,182 @@
 
 **Time: ~2.5 hours**
 
-## Goal
-Apply everything you've learned this week to build a new analytics area **from scratch**, with no step-by-step instructions. You own the design.
+---
+
+## Context
+
+The Procurement team currently runs ad-hoc SQL queries to understand which suppliers and parts drive the most value. They need a proper analytics layer they can connect to a dashboard — consistent, tested, and documented.
+
+Your job is to build that layer from scratch using the TPC-H `SUPPLIER`, `PART`, and `LINEITEM` tables. You already have `LINEITEM`, `ORDERS`, `SUPPLIER`, and `NATION` in bronze. The only table missing is `PART`.
+
+This exercise applies every practice from the week: layered architecture, macros, packages, tests, and documentation. There are no step-by-step instructions — only requirements, the business questions to answer, and criteria for what good looks like.
 
 ---
 
-## The Brief
+## Business Questions to Answer
 
-The Procurement team wants a self-service gold layer to answer these questions:
+The three gold models you build must collectively answer:
 
-1. **Which suppliers generate the most revenue across all orders?**
-2. **Which part types have the highest discount rates on average?**
-3. **What is each supplier's monthly revenue trend?**
-4. **Which parts are most frequently ordered, and what is their average order quantity?**
-5. **How does supplier performance vary by nation?**
+1. Which suppliers generate the most net revenue, and how do they rank globally?
+2. Which parts sell the most units, and what is their average discount rate?
+3. How does each supplier's monthly revenue evolve over time — is it growing or shrinking?
 
 ---
 
-## Setup: Add bronze_tpch_parts
+## Step 1 — Add the Missing Bronze Model
 
-TPC-H's `PART` table is your "product catalog". Add it to your bronze layer first.
+`PART` is the product catalog — 200,000 parts with name, type, manufacturer, and retail price. Without it you cannot answer the parts question.
 
-Create `models/bronze/bronze_tpch_parts.sql`:
+Add `models/bronze/bronze_tpch_parts.sql` following the same conventions as every other bronze model in the project: rename raw columns to readable names, use `{{ source() }}`, no transformations.
 
-```sql
-SELECT
-    p_partkey       AS part_id,
-    p_name          AS part_name,
-    p_mfgr          AS manufacturer,
-    p_type          AS part_type,
-    p_size          AS size,
-    p_retailprice   AS retail_price
-FROM {{ source('tpch', 'part') }}
-```
-
-Add `part` to `tpch_sources.yml`:
+Then register the source in `tpch_sources.yml`:
 ```yaml
 - name: part
-  description: "200K parts catalog"
+  description: "TPC-H parts catalog — 200K rows, one row per part."
 ```
 
+**Why:** Bronze models are the single point of truth for raw data. If you skip this and join directly from source in a silver or gold model, you break the lineage and duplicate the renaming logic.
+
 ---
 
-## Requirements
+## Step 2 — Build a Silver Intermediate Model
+
+Create `models/silver/silver_supplier_sales.sql`.
+
+This model joins `bronze_tpch_lineitem` with `bronze_tpch_suppliers` and `bronze_tpch_nations` to produce a clean, enriched fact table at line-item grain with readable supplier and nation names resolved. It should also carry `ship_date`, `ship_year`, and `ship_month` so the gold monthly model doesn't need to extract dates itself.
+
+Use `net_price` and `extended_price` from `bronze_tpch_lineitem` (already computed in bronze). Use CTEs — no nested subqueries.
+
+**Why:** Gold models should aggregate, not join. If both `gold_supplier_revenue` and `gold_supplier_monthly_revenue` join to suppliers and nations independently, you're duplicating join logic. Silver is the right place to resolve it once.
+
+---
+
+## Step 3 — Build the Gold Models
 
 ### `models/gold/gold_supplier_revenue.sql`
-Grain: one row per `supplier_id`.
-
-Must include:
-- `supplier_id`, `supplier_name`, `nation_name`
-- `total_line_items`: number of line items fulfilled by this supplier
-- `total_gross_revenue`: sum of `extended_price`
-- `total_net_revenue`: sum of `net_price`
-- `avg_discount_rate`: average discount applied
-- `revenue_rank`: rank by total_net_revenue globally
-- Use `{{ safe_divide(...) }}` for any division
+One row per supplier. Aggregates total revenue, line item count, average discount, and ranks suppliers globally by net revenue. Use `{{ revenue_tier() }}` to classify each supplier — override the macro defaults since supplier revenue is on a much larger scale than the order-level defaults (`low=1000000, high=10000000`).
 
 ### `models/gold/gold_part_performance.sql`
-Grain: one row per `part_id`.
-
-Must include:
-- `part_id`, `part_name`, `manufacturer`, `part_type`
-- `retail_price`
-- `total_orders`: distinct orders containing this part
-- `total_units_sold`: sum of quantity
-- `total_revenue`: sum of net_price
-- `avg_quantity_per_order`
-- `avg_discount_rate`
-- Surrogate key using `{{ dbt_utils.generate_surrogate_key(['part_id']) }}`
+One row per part. Joins `bronze_tpch_lineitem` with `bronze_tpch_parts` to aggregate total units sold, distinct orders, total revenue, and average discount per part. Use `{{ dbt_utils.generate_surrogate_key(['part_id']) }}` as the surrogate key — `part_id` is a natural key from TPC-H but the pattern of using surrogate keys consistently applies here too.
 
 ### `models/gold/gold_supplier_monthly_revenue.sql`
-Grain: one row per `(supplier_id, ship_year, ship_month)`.
-
-Must include:
-- `supplier_id`, `supplier_name`, `nation_name`
-- `ship_year`, `ship_month`
-- `monthly_net_revenue`
-- `monthly_line_items`
-- `mom_revenue_change_pct`: month-over-month % change (LAG window function)
-- Use `{{ date_dimensions('ship_date') }}` macro or inline equivalents
+One row per `(supplier_id, ship_year, ship_month)`. Built from `silver_supplier_sales`. Aggregates monthly net revenue and line item count per supplier, and computes month-over-month revenue change using a LAG window function partitioned by `supplier_id` and ordered chronologically.
 
 ---
 
-## Testing Requirements
+## Step 4 — Test Everything
 
-Create `models/gold/schema.yml` entries for all three models. Include at minimum:
+Create or extend `models/gold/schema.yml` with entries for all three models.
 
-- `unique` + `not_null` on every primary key
-- `not_null` on all metric columns
-- At least one `dbt_utils.expression_is_true` per model (e.g. `"total_net_revenue >= 0"`)
-- One singular test: `tests/assert_supplier_revenue_matches_lineitem.sql` — total net revenue in `gold_supplier_revenue` must equal total `net_price` in `bronze_tpch_lineitem` (within rounding)
+Minimum requirements per model:
+- `unique` + `not_null` on the primary key (or the combination of columns that defines uniqueness)
+- `not_null` on every metric column
+- At least one `dbt_utils.expression_is_true` that validates a business rule — examples: total net revenue must be positive, revenue rank must be between 1 and the total number of suppliers, avg discount rate must be between 0 and 1
 
----
+Also write one singular test in `tests/assert_supplier_revenue_matches_lineitem.sql`: the sum of `total_net_revenue` across all suppliers in `gold_supplier_revenue` must equal the sum of `net_price` across all rows in `bronze_tpch_lineitem`. If they don't match, your aggregation has a bug.
 
-## Documentation Requirements
-
-- Model-level descriptions for all 3 models (grain, business purpose)
-- Column descriptions for every metric column
-- Add an exposure `procurement_dashboard` in `models/exposures.yml` that depends on all 3 models
+**Why:** A gold model without tests is just a view someone will trust blindly. The singular test is a cross-model consistency check — the kind of validation that catches fan-out joins (accidental row duplication) before they reach a dashboard.
 
 ---
 
-## Macro Requirements
+## Step 5 — Document Everything
 
-Use at least:
-- `{{ dbt_utils.generate_surrogate_key([...]) }}`
-- `{{ safe_divide(...) }}`
-- `{{ net_price(...) }}` or `{{ date_dimensions(...) }}`
+Add to `schema.yml`:
+- A model-level `description` for each gold model — state the grain and business purpose in one sentence
+- Column-level `description` for every metric column (not for IDs and names, those are self-explanatory)
+
+Add the procurement exposure to `models/exposures.yml`:
+```yaml
+- name: procurement_dashboard
+  label: "Supplier & Parts Analytics"
+  type: dashboard
+  maturity: low
+  description: >
+    Supplier revenue ranking, parts performance, and monthly revenue trends.
+    Built in the capstone — connects to the Procurement team's BI tool.
+  depends_on:
+    - ref('gold_supplier_revenue')
+    - ref('gold_part_performance')
+    - ref('gold_supplier_monthly_revenue')
+  owner:
+    name: "Procurement Team"
+    email: "procurement@example.com"
+```
 
 ---
 
 ## Delivery
 
 ```bash
-dbt build --select gold_supplier_revenue+ gold_part_performance+ gold_supplier_monthly_revenue+
+dbt build --select bronze_tpch_parts silver_supplier_sales gold_supplier_revenue gold_part_performance gold_supplier_monthly_revenue
 ```
 
-All models must build and all tests must pass. Then:
-
+All models must build and all tests must pass. Then generate docs:
 ```bash
-dbt docs generate && dbt docs serve
+dbt docs generate
 ```
 
-All three models must appear in the DAG with full documentation.
+Open the docs site from the **Artifacts** tab in dbt Cloud and verify:
+- All three gold models appear in the DAG connected to their sources
+- `procurement_dashboard` appears as a terminal node
+- Each model has a description and metrics have column descriptions
 
 ---
 
-## Grading Rubric
+## Criteria for Good Work
 
-| Criterion | Points |
-|---|---|
-| All 3 models run without errors | 20 |
-| Correct grain in each model | 15 |
-| All required columns present and correctly computed | 20 |
-| All tests pass | 15 |
-| Documentation complete (model + column descriptions) | 10 |
-| Macros used correctly | 10 |
-| Exposure declared | 5 |
-| Code readability (CTEs, naming, comments) | 5 |
-| **Total** | **100** |
+**Architecture:** bronze renames only, silver resolves joins, gold aggregates. No joins in gold that should be in silver.
+
+**SQL style:** CTEs with descriptive names, not nested subqueries. Columns named for the business, not the database.
+
+**Macros:** `revenue_tier`, `net_price`, and `generate_surrogate_key` used where they add clarity — not forced in where they don't fit.
+
+**Tests:** every primary key tested for uniqueness and null, every metric tested for validity, singular test passes.
+
+**Documentation:** someone who didn't write the model can understand its grain and purpose from the description alone.
 
 ---
 
 ## Hints (read only if stuck)
 
 <details>
-<summary>Hint 1: gold_supplier_revenue joins</summary>
+<summary>Hint 1: silver_supplier_sales structure</summary>
 
-Start from `bronze_tpch_lineitem` and join `bronze_tpch_suppliers` on `supplier_id`, then join `bronze_tpch_nations` on `nation_id`.
+```sql
+WITH lineitem AS (
+    SELECT * FROM {{ ref('bronze_tpch_lineitem') }}
+),
+suppliers AS (
+    SELECT * FROM {{ ref('bronze_tpch_suppliers') }}
+),
+nations AS (
+    SELECT * FROM {{ ref('bronze_tpch_nations') }}
+)
+SELECT
+    l.order_id,
+    l.line_number,
+    l.supplier_id,
+    s.supplier_name,
+    n.nation_name,
+    l.part_id,
+    l.quantity,
+    l.extended_price,
+    l.discount_rate,
+    l.net_price,
+    l.ship_date,
+    YEAR(l.ship_date)  AS ship_year,
+    MONTH(l.ship_date) AS ship_month
+FROM lineitem l
+JOIN suppliers s ON l.supplier_id = s.supplier_id
+JOIN nations   n ON s.nation_id   = n.nation_id
+```
 
 </details>
 
 <details>
-<summary>Hint 2: gold_part_performance joins</summary>
+<summary>Hint 2: gold_supplier_revenue structure</summary>
 
-Join `bronze_tpch_lineitem` to `bronze_tpch_parts` on `part_id`.
+Aggregate from `silver_supplier_sales`, group by `supplier_id`, `supplier_name`, `nation_name`. Use `RANK() OVER (ORDER BY total_net_revenue DESC)` for the revenue rank.
 
 </details>
 
@@ -167,16 +188,18 @@ Join `bronze_tpch_lineitem` to `bronze_tpch_parts` on `part_id`.
 LAG(monthly_net_revenue) OVER (
     PARTITION BY supplier_id
     ORDER BY ship_year, ship_month
-) AS prev_month_revenue
+) AS prev_month_revenue,
 
-{{ safe_divide('monthly_net_revenue - prev_month_revenue', 'prev_month_revenue') }} * 100
-    AS mom_revenue_change_pct
+ROUND(
+    (monthly_net_revenue - prev_month_revenue) / NULLIF(prev_month_revenue, 0) * 100,
+    2
+) AS mom_revenue_change_pct
 ```
 
 </details>
 
 <details>
-<summary>Hint 4: assert_supplier_revenue_matches_lineitem</summary>
+<summary>Hint 4: singular test</summary>
 
 ```sql
 WITH lineitem_total AS (
